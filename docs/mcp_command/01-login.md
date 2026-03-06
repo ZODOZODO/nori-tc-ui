@@ -20,7 +20,7 @@ Pencil MCP 작업 요청:
 🔌 API 스펙 (백엔드 구현 기준)
 ─────────────────────────────
 
-- Endpoint: POST /auth/login
+- Endpoint: POST /api/auth/login
 - Request Body:
 {
   "userId": "admin",
@@ -61,8 +61,8 @@ Pencil MCP 작업 요청:
 🛡 CSRF 계약 (필수)
 ─────────────────────────────
 
-1. 로그인 전에 GET /auth/csrf를 먼저 호출해 CSRF 쿠키를 확보하세요.
-2. POST /auth/login 요청 시 CSRF 헤더(X-XSRF-TOKEN)를 포함하세요. 값은 CSRF 쿠키(XSRF-TOKEN) 기준으로 처리하세요.
+1. 로그인 전에 GET /api/auth/csrf를 먼저 호출해 CSRF 쿠키를 확보하세요.
+2. POST /api/auth/login 요청 시 CSRF 헤더(X-XSRF-TOKEN)를 포함하세요. 값은 CSRF 쿠키(XSRF-TOKEN) 기준으로 처리하세요.
 3. 상태 변경 요청(POST/PUT/PATCH/DELETE)은 동일한 CSRF 처리 규칙을 따르세요.
 
 ─────────────────────────────
@@ -135,7 +135,7 @@ Pencil MCP 작업 요청:
 - LoginPage에서 mutate/mutateAsync, isPending, error 사용 가능하게 구성
 
 3. auth.api.ts
-- apiClient로 GET /auth/csrf + POST /auth/login 처리
+- apiClient로 GET /api/auth/csrf + POST /api/auth/login 처리
 - 성공/실패 응답 파싱 분리
 - success wrapper, errorCode/errorMsg를 명확히 반환
 - 쿠키 기반 인증 전제(본문 token 의존 금지)
@@ -152,7 +152,7 @@ Pencil MCP 작업 요청:
 1. TypeScript 컴파일 에러 0
 2. 런타임 에러 0
 3. / 접속 시 /login 리다이렉트 정상
-4. 로그인 전 /auth/csrf 호출 및 CSRF 헤더 처리 정상
+4. 로그인 전 /api/auth/csrf 호출 및 CSRF 헤더 처리 정상
 5. 로그인 성공 시 token 저장(localStorage/sessionStorage) 없이 쿠키 기반 인증으로 동작
 6. 로그인 후 보호 API(GET /api/eqp) 호출 성공
 7. 로그인 실패 시 서버 메시지 폼 하단 표시

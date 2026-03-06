@@ -36,7 +36,7 @@ const getCookieValue = (name: string): string | null => {
  * 로그인 전 CSRF 쿠키를 발급받고, 헤더에 사용할 토큰 값을 반환합니다.
  */
 const issueCsrfToken = async (): Promise<string> => {
-  await apiClient.get('/auth/csrf', {
+  await apiClient.get('/api/auth/csrf', {
     withCredentials: true,
   })
 
@@ -80,15 +80,15 @@ export const authApi = {
 
   /**
    * 로그인 API를 호출합니다.
-   * - GET /auth/csrf 선호출
-   * - POST /auth/login 호출 시 withCredentials + X-XSRF-TOKEN 헤더 포함
+   * - GET /api/auth/csrf 선호출
+   * - POST /api/auth/login 호출 시 withCredentials + X-XSRF-TOKEN 헤더 포함
    * - token 본문 의존 없이 쿠키 기반 인증만 사용
    */
   login: async (credentials: LoginRequest): Promise<LoginSuccessResponse> => {
     const csrfToken = await issueCsrfToken()
 
     try {
-      const response = await apiClient.post<LoginResponse>('/auth/login', credentials, {
+      const response = await apiClient.post<LoginResponse>('/api/auth/login', credentials, {
         withCredentials: true,
         headers: {
           [CSRF_HEADER_NAME]: csrfToken,

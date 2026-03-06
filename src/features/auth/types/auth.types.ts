@@ -12,7 +12,7 @@ export interface ApiResponse<TData> {
 }
 
 /**
- * POST /auth/login 요청 바디 타입입니다.
+ * POST /api/auth/login 요청 바디 타입입니다.
  */
 export interface LoginRequest {
   userId: string
