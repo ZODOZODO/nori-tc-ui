@@ -1,0 +1,165 @@
+import { Loader2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import type { EqpInfo, EqpModelInfo, EqpRuntimeState } from '../types/eqp.types'
+
+interface EqpInfoTableProps {
+  eqp: EqpInfo | null
+  modelInfo: EqpModelInfo | null
+  runtimeState: EqpRuntimeState | null
+  isLoading: boolean
+  isFetching: boolean
+}
+
+type EquipmentVisualState = 'inactive' | 'ready' | 'attention'
+
+const CONNECTED_STATE_SET = new Set(['CONNECTED', 'CONNECT', 'ONLINE', 'UP'])
+
+/**
+ * enabled + runtime 상태를 조합해 설비 상태 아이콘 색상을 결정합니다.
+ */
+const resolveEquipmentVisualState = (
+  eqp: EqpInfo,
+  runtimeState: EqpRuntimeState | null,
+): EquipmentVisualState => {
+  if (!eqp.enabled) {
+    return 'inactive'
+  }
+
+  const controlState = runtimeState?.controlState?.trim().toUpperCase() ?? ''
+  const connectionState = runtimeState?.connectionState?.trim().toUpperCase() ?? ''
+
+  const isGreenByControlState = controlState === 'REMOTE' || controlState === 'LOCAL'
+  const isGreenByConnectionState = CONNECTED_STATE_SET.has(connectionState)
+
+  if (isGreenByControlState || isGreenByConnectionState) {
+    return 'ready'
+  }
+
+  return 'attention'
+}
+
+/**
+ * 상태를 원형 네온 점 아이콘으로 렌더링합니다.
+ */
+function EquipmentStatusIndicator({ status }: { status: EquipmentVisualState }) {
+  if (status === 'inactive') {
+    return (
+      <span
+        className="relative inline-flex size-4 items-center justify-center rounded-full bg-slate-100 ring-2 ring-slate-300/80"
+        title="비활성"
+        aria-label="비활성"
+      >
+        <span className="inline-flex size-2 rounded-full bg-slate-500" />
+      </span>
+    )
+  }
+
+  if (status === 'ready') {
+    return (
+      <span
+        className="relative inline-flex size-4 items-center justify-center rounded-full bg-emerald-100/90 ring-2 ring-emerald-300/80 shadow-[0_0_10px_rgba(16,185,129,0.35)]"
+        title="활성(정상)"
+        aria-label="활성(정상)"
+      >
+        <span className="absolute inline-flex size-4 rounded-full bg-emerald-300/35 motion-safe:animate-ping" />
+        <span className="relative inline-flex size-2 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500" />
+      </span>
+    )
+  }
+
+  return (
+    <span
+      className="relative inline-flex size-4 items-center justify-center rounded-full bg-amber-100/90 ring-2 ring-amber-300/80 shadow-[0_0_10px_rgba(245,158,11,0.3)]"
+      title="활성(주의)"
+      aria-label="활성(주의)"
+    >
+      <span className="absolute inline-flex size-4 rounded-full bg-amber-300/30 motion-safe:animate-ping" />
+      <span className="relative inline-flex size-2 rounded-full bg-gradient-to-br from-amber-400 to-orange-500" />
+    </span>
+  )
+}
+
+/**
+ * 선택된 설비의 단건 정보를 표시하는 상단 테이블입니다.
+ * Check Out/Check In 버튼은 design.pen의 DetailLayout(version section)에서 제어합니다.
+ */
+export function EqpInfoTable({
+  eqp,
+  modelInfo,
+  runtimeState,
+  isLoading,
+  isFetching,
+}: EqpInfoTableProps) {
+  const commInterfaceBadgeVariant = eqp?.commInterface === 'HSMS' ? 'info' : 'warning'
+
+  return (
+    <section className="rounded-2xl border border-[#E4EAE6] bg-white p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-base font-semibold text-[#213028]">설비 정보</h2>
+      </div>
+
+      <div className="overflow-x-auto">
+        <Table className="min-w-[1180px]">
+          <TableHeader>
+            <TableRow className="bg-[#F6F9F7]">
+              <TableHead>EQPID</TableHead>
+              <TableHead>Comm Interface</TableHead>
+              <TableHead>Comm Mode</TableHead>
+              <TableHead>Route Partition</TableHead>
+              <TableHead>IP</TableHead>
+              <TableHead>Port</TableHead>
+              <TableHead>Enabled</TableHead>
+              <TableHead>Model</TableHead>
+              <TableHead>Model Version</TableHead>
+              <TableHead>Gateway Jarfile</TableHead>
+              <TableHead>Business Jarfile</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={11} className="py-10 text-center text-sm text-[#647169]">
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    설비 상세 정보를 불러오는 중입니다.
+                  </span>
+                </TableCell>
+              </TableRow>
+            ) : eqp ? (
+              <TableRow data-state="selected">
+                <TableCell className="font-semibold">{eqp.eqpId}</TableCell>
+                <TableCell>
+                  <Badge variant={commInterfaceBadgeVariant}>{eqp.commInterface}</Badge>
+                </TableCell>
+                <TableCell>{eqp.commMode}</TableCell>
+                <TableCell>{eqp.routePartition ?? '—'}</TableCell>
+                <TableCell>{eqp.eqpIp}</TableCell>
+                <TableCell>{eqp.eqpPort}</TableCell>
+                <TableCell>
+                  <EquipmentStatusIndicator
+                    status={resolveEquipmentVisualState(eqp, runtimeState)}
+                  />
+                </TableCell>
+                <TableCell>{modelInfo?.modelName ?? '—'}</TableCell>
+                <TableCell>{modelInfo?.modelVersion ?? '—'}</TableCell>
+                <TableCell>—</TableCell>
+                <TableCell>—</TableCell>
+              </TableRow>
+            ) : (
+              <TableRow>
+                <TableCell colSpan={11} className="py-10 text-center text-sm text-[#647169]">
+                  표시할 설비를 선택해 주세요.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {isFetching && !isLoading ? (
+        <p className="mt-2 text-xs text-[#7A8680]">선택된 설비 데이터를 동기화 중입니다.</p>
+      ) : null}
+    </section>
+  )
+}

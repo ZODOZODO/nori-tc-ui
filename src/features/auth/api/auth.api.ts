@@ -2,6 +2,7 @@ import { isAxiosError } from 'axios'
 import { apiClient } from '@/shared/lib/api-client'
 import {
   AuthApiError,
+  DEFAULT_AUTH_ERROR_MESSAGE,
   createLoginFailResponse,
   isLoginSuccessResponse,
   type LoginRequest,
@@ -11,6 +12,7 @@ import {
 
 const CSRF_COOKIE_NAME = 'XSRF-TOKEN'
 const CSRF_HEADER_NAME = 'X-XSRF-TOKEN'
+const DEFAULT_LOGOUT_ERROR_MESSAGE = '로그아웃 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'
 
 /**
  * document.cookie에서 쿠키 값을 읽어 옵니다.
@@ -59,16 +61,22 @@ const issueCsrfToken = async (): Promise<string> => {
 /**
  * 알 수 없는 예외를 AuthApiError로 정규화합니다.
  */
-const normalizeAuthError = (error: unknown): AuthApiError => {
+const normalizeAuthError = (
+  error: unknown,
+  fallbackMessage = DEFAULT_AUTH_ERROR_MESSAGE
+): AuthApiError => {
   if (error instanceof AuthApiError) {
     return error
   }
 
   if (isAxiosError(error)) {
-    return new AuthApiError(createLoginFailResponse(error.response?.data), error.response?.status)
+    return new AuthApiError(
+      createLoginFailResponse(error.response?.data, fallbackMessage),
+      error.response?.status
+    )
   }
 
-  return new AuthApiError(createLoginFailResponse(error))
+  return new AuthApiError(createLoginFailResponse(error, fallbackMessage))
 }
 
 export const authApi = {
@@ -111,6 +119,46 @@ export const authApi = {
     } catch (error) {
       const normalizedError = normalizeAuthError(error)
       console.warn('[authApi] login failed', {
+        status: normalizedError.status,
+        errorCode: normalizedError.payload.errorCode,
+      })
+      throw normalizedError
+    }
+  },
+
+  /**
+   * 로그아웃 API를 호출하여 서버 세션/쿠키를 무효화합니다.
+   * - POST /api/auth/logout 호출 전 CSRF 토큰을 발급받아 헤더에 포함합니다.
+   * - 401은 이미 인증이 만료된 상태일 수 있으므로 로그아웃 완료로 간주합니다.
+   */
+  logout: async (): Promise<void> => {
+    const csrfToken = await issueCsrfToken()
+
+    try {
+      const response = await apiClient.post('/auth/logout', null, {
+        withCredentials: true,
+        headers: {
+          [CSRF_HEADER_NAME]: csrfToken,
+        },
+        validateStatus: (status) => status >= 200 && status < 500,
+      })
+
+      if (response.status === 401) {
+        console.info('[authApi] logout skipped due to already invalid session')
+        return
+      }
+
+      if (response.status >= 400) {
+        throw new AuthApiError(
+          createLoginFailResponse(response.data, DEFAULT_LOGOUT_ERROR_MESSAGE),
+          response.status
+        )
+      }
+
+      console.info('[authApi] logout success')
+    } catch (error) {
+      const normalizedError = normalizeAuthError(error, DEFAULT_LOGOUT_ERROR_MESSAGE)
+      console.warn('[authApi] logout failed', {
         status: normalizedError.status,
         errorCode: normalizedError.payload.errorCode,
       })

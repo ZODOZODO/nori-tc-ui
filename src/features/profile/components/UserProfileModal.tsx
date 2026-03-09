@@ -1,0 +1,317 @@
+import { useMemo, useState } from 'react'
+import { Loader2, UserRound } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { useMe, useResetPassword, useUpdateUser, useUserDetail } from '../hooks/useProfile'
+import { ProfileApiError } from '../types/profile.types'
+
+interface UserProfileModalProps {
+  open: boolean
+  onClose: () => void
+}
+
+interface ProfileFormState {
+  company: string
+  department: string
+  userName: string
+  userId: string
+  email: string
+  status: string
+}
+
+/**
+ * Eqp 화면 상단 프로필 아이콘에서 여는 사용자 정보 수정 모달입니다.
+ * GET /api/auth/me -> GET /api/user/{userPk} 순서로 데이터를 읽고,
+ * 저장 시 PUT /api/user/{userPk}, 비밀번호 변경 시 POST /api/user/{userPk}/password/reset을 호출합니다.
+ */
+export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
+  const [draftFormState, setDraftFormState] = useState<Partial<ProfileFormState>>({})
+  const [showPasswordEditor, setShowPasswordEditor] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
+
+  const meQuery = useMe(open)
+  const userPk = open ? (meQuery.data?.userPk ?? null) : null
+  const userDetailQuery = useUserDetail(userPk, open && userPk !== null)
+
+  const updateUserMutation = useUpdateUser()
+  const resetPasswordMutation = useResetPassword()
+
+  const isBusy = updateUserMutation.isPending || resetPasswordMutation.isPending
+
+  /**
+   * 서버 원본 데이터 + 사용자가 수정 중인 draft 값을 합쳐 현재 폼 값을 만듭니다.
+   * useEffect 동기화 없이도 데이터 로딩/재요청에 안전하게 대응할 수 있습니다.
+   */
+  const resolvedFormState = useMemo<ProfileFormState>(
+    () => ({
+      company: draftFormState.company ?? userDetailQuery.data?.company ?? '',
+      department: draftFormState.department ?? userDetailQuery.data?.department ?? '',
+      userName: draftFormState.userName ?? userDetailQuery.data?.userName ?? '',
+      userId: draftFormState.userId ?? userDetailQuery.data?.userId ?? '',
+      email: draftFormState.email ?? userDetailQuery.data?.email ?? '',
+      status: draftFormState.status ?? userDetailQuery.data?.status ?? 'ACTIVE',
+    }),
+    [draftFormState, userDetailQuery.data],
+  )
+
+  const modalErrorMessage = useMemo(() => {
+    if (meQuery.error instanceof ProfileApiError) {
+      return meQuery.error.payload.errorMsg
+    }
+
+    if (userDetailQuery.error instanceof ProfileApiError) {
+      return userDetailQuery.error.payload.errorMsg
+    }
+
+    return null
+  }, [meQuery.error, userDetailQuery.error])
+
+  const resetTransientState = () => {
+    setDraftFormState({})
+    setShowPasswordEditor(false)
+    setNewPassword('')
+    setFeedbackMessage(null)
+  }
+
+  const closeModal = () => {
+    if (isBusy) {
+      return
+    }
+    resetTransientState()
+    onClose()
+  }
+
+  const handleFieldChange = (field: keyof ProfileFormState, value: string) => {
+    setDraftFormState((prev) => ({
+      ...prev,
+      [field]: value,
+    }))
+    setFeedbackMessage(null)
+  }
+
+  const handleSaveProfile = async () => {
+    if (!userPk) {
+      setFeedbackMessage('현재 사용자 정보를 확인할 수 없어 저장할 수 없습니다.')
+      return
+    }
+
+    try {
+      setFeedbackMessage(null)
+      await updateUserMutation.mutateAsync({
+        userPk,
+        request: {
+          company: resolvedFormState.company.trim(),
+          department: resolvedFormState.department.trim(),
+          userName: resolvedFormState.userName.trim(),
+          userId: resolvedFormState.userId,
+          password: null,
+          email: resolvedFormState.email.trim(),
+          status: resolvedFormState.status,
+          updatedBy: meQuery.data?.userId ?? resolvedFormState.userId,
+        },
+      })
+      closeModal()
+    } catch (error) {
+      if (error instanceof ProfileApiError) {
+        setFeedbackMessage(error.payload.errorMsg)
+        return
+      }
+
+      setFeedbackMessage('사용자 정보를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.')
+    }
+  }
+
+  const handleResetPassword = async () => {
+    if (!userPk) {
+      setFeedbackMessage('현재 사용자 정보를 확인할 수 없어 비밀번호를 변경할 수 없습니다.')
+      return
+    }
+
+    const trimmedPassword = newPassword.trim()
+    if (trimmedPassword.length < 8) {
+      setFeedbackMessage('새 비밀번호는 8자 이상 입력해 주세요.')
+      return
+    }
+
+    try {
+      setFeedbackMessage(null)
+      await resetPasswordMutation.mutateAsync({
+        userPk,
+        request: {
+          newPassword: trimmedPassword,
+          updatedBy: meQuery.data?.userId ?? resolvedFormState.userId,
+        },
+      })
+      setNewPassword('')
+      setShowPasswordEditor(false)
+      setFeedbackMessage('비밀번호가 변경되었습니다.')
+    } catch (error) {
+      if (error instanceof ProfileApiError) {
+        setFeedbackMessage(error.payload.errorMsg)
+        return
+      }
+
+      setFeedbackMessage('비밀번호를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.')
+    }
+  }
+
+  if (!open) {
+    return null
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#121A174D] px-4" onClick={closeModal}>
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="user-profile-modal-title"
+        className="w-full max-w-[640px] rounded-[24px] border border-[#E8E4DF] bg-white p-[26px] shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex flex-col gap-[18px]">
+          <header className="flex items-start gap-3">
+            <div className="flex size-11 items-center justify-center rounded-full bg-[#EDF4EF]">
+              <UserRound className="size-5 text-[#1C7F59]" />
+            </div>
+            <div className="flex-1">
+              <h2 id="user-profile-modal-title" className="text-2xl font-bold text-[#1F2D26]">
+                사용자 정보 수정
+              </h2>
+              <p className="text-xs text-[#6C7872]">기본 정보와 연락처를 수정할 수 있습니다.</p>
+            </div>
+          </header>
+
+          {meQuery.isLoading || userDetailQuery.isLoading ? (
+            <div className="flex items-center justify-center rounded-xl border border-[#E8E4DF] bg-[#FAFCFB] py-8 text-sm text-[#5D6963]">
+              <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+              사용자 정보를 불러오는 중입니다.
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="profile-company" className="text-[11px] font-bold text-[#4A5A52] uppercase">
+                    company
+                  </label>
+                  <Input
+                    id="profile-company"
+                    value={resolvedFormState.company}
+                    onChange={(event) => handleFieldChange('company', event.target.value)}
+                    className="h-[46px] rounded-xl"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="profile-user-name" className="text-[11px] font-bold text-[#4A5A52] uppercase">
+                    user_name
+                  </label>
+                  <Input
+                    id="profile-user-name"
+                    value={resolvedFormState.userName}
+                    onChange={(event) => handleFieldChange('userName', event.target.value)}
+                    className="h-[46px] rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="profile-user-id" className="text-[11px] font-bold text-[#4A5A52] uppercase">
+                  user_id
+                </label>
+                <Input
+                  id="profile-user-id"
+                  value={resolvedFormState.userId}
+                  readOnly
+                  className="h-[46px] rounded-xl border-[#E2E6E3] bg-[#F4F3F0] text-[#7F8A84]"
+                />
+                <p className="text-[10px] text-[#9AA29D]">user_id는 수정할 수 없습니다.</p>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="profile-password" className="text-[11px] font-bold text-[#4A5A52] uppercase">
+                  password
+                </label>
+                <div className="flex gap-2">
+                  <Input
+                    id="profile-password"
+                    type="password"
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
+                    disabled={!showPasswordEditor}
+                    placeholder={showPasswordEditor ? '새 비밀번호 입력' : '••••••••'}
+                    className="h-[46px] rounded-xl"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-[46px] rounded-[19px] border-[#CFE1D8] bg-[#EAF3EE] px-4 text-xs font-semibold text-[#2D5543]"
+                    onClick={() => {
+                      if (showPasswordEditor) {
+                        void handleResetPassword()
+                        return
+                      }
+                      setShowPasswordEditor(true)
+                      setFeedbackMessage(null)
+                    }}
+                    disabled={isBusy}
+                  >
+                    {resetPasswordMutation.isPending ? (
+                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    ) : null}
+                    {showPasswordEditor ? '저장하기' : '변경하기'}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="profile-email" className="text-[11px] font-bold text-[#4A5A52] uppercase">
+                  email
+                </label>
+                <Input
+                  id="profile-email"
+                  type="email"
+                  value={resolvedFormState.email}
+                  onChange={(event) => handleFieldChange('email', event.target.value)}
+                  className="h-[46px] rounded-xl"
+                />
+              </div>
+
+              <p className="text-[11px] text-[#8A9590]">
+                비밀번호는 우측 변경하기 버튼에서 수정할 수 있습니다.
+              </p>
+            </>
+          )}
+
+          <div className="h-px w-full bg-[#ECEAE5]" />
+
+          {modalErrorMessage || feedbackMessage ? (
+            <p className="rounded-md border border-[#F0D2D0] bg-[#FFF7F7] px-3 py-2 text-sm text-[#B4483F]">
+              {feedbackMessage ?? modalErrorMessage}
+            </p>
+          ) : null}
+
+          <footer className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 rounded-full border-[#E2E0DA] bg-white px-5 text-sm font-semibold text-[#4D5A53]"
+              onClick={closeModal}
+              disabled={isBusy}
+            >
+              취소
+            </Button>
+            <Button
+              type="button"
+              className="h-10 rounded-full bg-[#1C7F59] px-5 text-sm font-semibold text-white hover:bg-[#166749]"
+              onClick={() => void handleSaveProfile()}
+              disabled={isBusy || meQuery.isLoading || userDetailQuery.isLoading}
+            >
+              {updateUserMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+              저장하기
+            </Button>
+          </footer>
+        </div>
+      </section>
+    </div>
+  )
+}
