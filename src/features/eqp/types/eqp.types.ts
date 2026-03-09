@@ -230,3 +230,65 @@ export class EqpApiError extends Error {
     this.status = status
   }
 }
+
+// =========================================================================
+// Check Out / Check In 관련 타입
+// =========================================================================
+
+/**
+ * tc_eqp_param 파라미터 단건 모델입니다.
+ * GET /api/eqp/{eqpId}/params?version={version} 응답에 사용됩니다.
+ */
+export interface EqpParam {
+  paramName: string
+  paramValue: string | null
+  description: string | null
+  createdBy: string
+}
+
+/**
+ * 설비 체크아웃 상태 모델입니다.
+ * GET /api/eqp/{eqpId}/checkout-status 응답에 사용됩니다.
+ */
+export interface EqpCheckoutStatus {
+  isCheckedOut: boolean
+  checkedOutBy: string | null
+}
+
+/**
+ * 체크아웃 요청 DTO입니다.
+ */
+export interface EqpCheckoutRequest {
+  sourceVersion: string
+}
+
+/**
+ * 파라미터 단건 수정 항목입니다.
+ */
+export interface EqpParamSaveItem {
+  paramName: string
+  paramValue: string
+  description: string
+}
+
+/**
+ * 체크인 요청 DTO입니다.
+ */
+export interface EqpCheckinRequest {
+  newVersion: string
+  description: string
+}
+
+/**
+ * 파라미터 목록 조회 응답 타입입니다.
+ */
+export type EqpParamListResponse = ApiResponse<EqpParam[]>
+
+/**
+ * 체크아웃 상태 조회 응답 타입입니다.
+ * 백엔드 응답의 checkedOut 필드를 isCheckedOut으로 매핑합니다.
+ */
+export type EqpCheckoutStatusResponse = ApiResponse<{
+  checkedOut: boolean
+  checkedOutBy: string | null
+}>

@@ -7,6 +7,10 @@ import {
   type AsyncAcceptResponse,
   type AsyncResultData,
   type AsyncResultResponse,
+  type EqpCheckinRequest,
+  type EqpCheckoutRequest,
+  type EqpCheckoutStatus,
+  type EqpCheckoutStatusResponse,
   type EqpCreateRequest,
   type EqpDualCommandResponse,
   type EqpInfo,
@@ -16,6 +20,9 @@ import {
   type EqpModelInfoResponse,
   type EqpInfoPage,
   type EqpLifecycleRequest,
+  type EqpParam,
+  type EqpParamListResponse,
+  type EqpParamSaveItem,
   type EqpParamVersionListResponse,
   type EqpRuntimeState,
   type EqpRuntimeStateResponse,
@@ -297,6 +304,128 @@ export const eqpApi = {
       )
     } catch (error) {
       throw normalizeEqpError(error, '설비 런타임 상태를 조회하지 못했습니다.')
+    }
+  },
+
+  /**
+   * 설비 체크아웃 상태를 조회합니다.
+   */
+  getEqpCheckoutStatus: async (eqpId: string): Promise<EqpCheckoutStatus> => {
+    try {
+      const response = await apiClient.get<EqpCheckoutStatusResponse>(
+        `/eqp/${encodeURIComponent(eqpId)}/checkout-status`,
+        { withCredentials: true },
+      )
+
+      const payload = resolveSuccessPayload<{ checkedOut: boolean; checkedOutBy: string | null }>(
+        response.data,
+        response.status,
+        '설비 체크아웃 상태를 조회하지 못했습니다.',
+      )
+
+      return {
+        isCheckedOut: payload.checkedOut,
+        checkedOutBy: payload.checkedOutBy,
+      }
+    } catch (error) {
+      throw normalizeEqpError(error, '설비 체크아웃 상태를 조회하지 못했습니다.')
+    }
+  },
+
+  /**
+   * 특정 버전의 설비 파라미터 목록을 조회합니다.
+   */
+  getEqpParams: async (eqpId: string, version: string): Promise<EqpParam[]> => {
+    try {
+      const response = await apiClient.get<EqpParamListResponse>(
+        `/eqp/${encodeURIComponent(eqpId)}/params`,
+        {
+          params: { version },
+          withCredentials: true,
+        },
+      )
+
+      return resolveSuccessPayload<EqpParam[]>(
+        response.data,
+        response.status,
+        '설비 파라미터 목록을 조회하지 못했습니다.',
+      )
+    } catch (error) {
+      throw normalizeEqpError(error, '설비 파라미터 목록을 조회하지 못했습니다.')
+    }
+  },
+
+  /**
+   * 설비 파라미터를 체크아웃합니다.
+   * 이미 체크아웃 중이면 EqpApiError(status=409)를 던집니다.
+   */
+  checkoutEqp: async (eqpId: string, request: EqpCheckoutRequest): Promise<EqpParam[]> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.post<EqpParamListResponse>(
+          `/eqp/${encodeURIComponent(eqpId)}/checkout`,
+          request,
+          {
+            withCredentials: true,
+            headers: { [CSRF_HEADER_NAME]: csrfToken },
+            validateStatus: (status) => status >= 200 && status < 600,
+          },
+        ),
+      )
+
+      return resolveSuccessPayload<EqpParam[]>(
+        response.data,
+        response.status,
+        '설비 체크아웃에 실패했습니다.',
+      )
+    } catch (error) {
+      throw normalizeEqpError(error, '설비 체크아웃에 실패했습니다.')
+    }
+  },
+
+  /**
+   * EDIT 버전의 설비 파라미터를 저장합니다.
+   */
+  saveEqpEditParams: async (eqpId: string, params: EqpParamSaveItem[]): Promise<void> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.put<EqpDualCommandResponse>(
+          `/eqp/${encodeURIComponent(eqpId)}/edit-params`,
+          { params },
+          {
+            withCredentials: true,
+            headers: { [CSRF_HEADER_NAME]: csrfToken },
+            validateStatus: (status) => status >= 200 && status < 600,
+          },
+        ),
+      )
+
+      resolveSuccessPayload<null>(response.data, response.status, 'EDIT 파라미터 저장에 실패했습니다.', true)
+    } catch (error) {
+      throw normalizeEqpError(error, 'EDIT 파라미터 저장에 실패했습니다.')
+    }
+  },
+
+  /**
+   * 설비 파라미터를 체크인합니다.
+   */
+  checkinEqp: async (eqpId: string, request: EqpCheckinRequest): Promise<void> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.post<EqpDualCommandResponse>(
+          `/eqp/${encodeURIComponent(eqpId)}/checkin`,
+          request,
+          {
+            withCredentials: true,
+            headers: { [CSRF_HEADER_NAME]: csrfToken },
+            validateStatus: (status) => status >= 200 && status < 600,
+          },
+        ),
+      )
+
+      resolveSuccessPayload<null>(response.data, response.status, '설비 체크인에 실패했습니다.', true)
+    } catch (error) {
+      throw normalizeEqpError(error, '설비 체크인에 실패했습니다.')
     }
   },
 
