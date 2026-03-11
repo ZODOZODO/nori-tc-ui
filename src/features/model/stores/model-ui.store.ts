@@ -22,6 +22,10 @@ interface ModelUiState {
   setEditMode: (enabled: boolean) => void
   setCheckInModalOpen: (open: boolean) => void
   setProfileModalOpen: (open: boolean) => void
+  handleModelVersionsRemoved: (
+    removedModelVersionKeys: number[],
+    fallbackSelectedModelVersionKey?: number | null,
+  ) => void
   handleBranchCommitSuccess: (
     branchModelKey: number,
     committedParentModelVersionKey: number | null,
@@ -138,6 +142,41 @@ export const useModelUiStore = create<ModelUiState>((set) => ({
   setEditMode: (enabled) => set({ isEditMode: enabled }),
   setCheckInModalOpen: (open) => set({ isCheckInModalOpen: open }),
   setProfileModalOpen: (open) => set({ isProfileModalOpen: open }),
+  handleModelVersionsRemoved: (removedModelVersionKeys, fallbackSelectedModelVersionKey = null) =>
+    set((state) => {
+      const removedVersionKeySet = new Set(removedModelVersionKeys)
+      const nextTabs = state.openedTabs.filter(
+        (tab) => !removedVersionKeySet.has(tab.modelVersionKey),
+      )
+      const nextDetailNodeByTab = Object.fromEntries(
+        Object.entries(state.detailNodeByTab).filter(
+          ([modelVersionKey]) => !removedVersionKeySet.has(Number(modelVersionKey)),
+        ),
+      )
+
+      const hasActiveTab =
+        state.activeTab !== null && !removedVersionKeySet.has(state.activeTab)
+      const nextActiveTab = hasActiveTab
+        ? state.activeTab
+        : (nextTabs[nextTabs.length - 1]?.modelVersionKey ?? null)
+
+      const hasSelectedModelVersion =
+        state.selectedModelVersionKey !== null &&
+        !removedVersionKeySet.has(state.selectedModelVersionKey)
+      const nextSelectedModelVersionKey = hasSelectedModelVersion
+        ? state.selectedModelVersionKey
+        : (fallbackSelectedModelVersionKey ?? nextActiveTab)
+
+      return {
+        openedTabs: nextTabs,
+        activeTab: nextActiveTab,
+        selectedModelVersionKey: nextSelectedModelVersionKey ?? null,
+        detailNode: nextActiveTab !== null ? (nextDetailNodeByTab[nextActiveTab] ?? null) : null,
+        detailNodeByTab: nextDetailNodeByTab,
+        isEditMode: hasActiveTab ? state.isEditMode : false,
+        isCheckInModalOpen: hasActiveTab ? state.isCheckInModalOpen : false,
+      }
+    }),
   handleBranchCommitSuccess: (branchModelKey, committedParentModelVersionKey) =>
     set((state) => {
       const nextTabs = state.openedTabs.filter((tab) => tab.modelKey !== branchModelKey)

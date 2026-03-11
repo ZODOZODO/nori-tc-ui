@@ -9,6 +9,7 @@ import { useMe } from '@/features/profile/hooks/useProfile'
 import { ResizableDivider } from '@/features/eqp/components/ResizableDivider'
 import { useModelDetail } from '../hooks/useModelDetail'
 import { useModelList } from '../hooks/useModelList'
+import { useModelManagementMutations } from '../hooks/useModelManagementMutations'
 import { useModelNodeDetail } from '../hooks/useModelNodeDetail'
 import { useModelMutations } from '../hooks/useModelMutations'
 import { useModelUiStore } from '../stores/model-ui.store'
@@ -20,12 +21,20 @@ import {
   type ModelDetailRow,
   type ModelMdfContent,
   type ModelInfo,
+  type ModelParentCommitResult,
   type ProtocolType,
 } from '../types/model.types'
+import { BranchModelCreateModal } from './BranchModelCreateModal'
 import { ModelCheckInModal } from './ModelCheckInModal'
+import { ModelCreateOrUpdateModal } from './ModelCreateOrUpdateModal'
+import {
+  ModelDeleteConfirmDialog,
+  type ModelDeleteDialogMode,
+} from './ModelDeleteConfirmDialog'
 import { ModelDetailPanel } from './ModelDetailPanel'
 import { ModelInfoTable } from './ModelInfoTable'
 import { ModelSidebar } from './ModelSidebar'
+import { ParentModelCommitModal } from './ParentModelCommitModal'
 
 const LOGIN_ROUTE = '/login'
 const CSRF_COOKIE_NAME = 'XSRF-TOKEN'
@@ -90,6 +99,48 @@ const resolveDetailNodesByInterface = (commInterface: ProtocolType): ModelDetail
 }
 
 /**
+ * 상태 문자열이 DEPRECATED인지 확인합니다.
+ */
+const isDeprecatedStatus = (status: string): boolean =>
+  status.trim().toUpperCase() === 'DEPRECATED'
+
+/**
+ * 특정 model_name의 최신 대표 항목을 찾습니다.
+ */
+const resolveLatestModelByName = (modelItems: ModelInfo[], modelName: string | null): ModelInfo | null => {
+  if (!modelName) {
+    return null
+  }
+
+  return sortByUpdatedAtDesc(modelItems.filter((item) => item.modelName === modelName))[0] ?? null
+}
+
+/**
+ * 삭제 대상 modelKey 집합에 포함된 모든 version key를 수집합니다.
+ */
+const collectModelVersionKeysByModelKeys = (
+  modelItems: ModelInfo[],
+  modelKeys: number[],
+): number[] => {
+  const targetModelKeySet = new Set(modelKeys)
+
+  return modelItems
+    .filter((item) => targetModelKeySet.has(item.modelKey))
+    .map((item) => item.modelVersionKey)
+}
+
+/**
+ * root model 삭제 시 함께 사라지는 branch version key까지 모두 수집합니다.
+ */
+const collectCascadeDeletedVersionKeys = (
+  modelItems: ModelInfo[],
+  rootModelName: string,
+): number[] =>
+  modelItems
+    .filter((item) => item.modelName === rootModelName || item.parentModel === rootModelName)
+    .map((item) => item.modelVersionKey)
+
+/**
  * Model Info 메인 페이지입니다.
  */
 export function ModelPage() {
@@ -115,6 +166,7 @@ export function ModelPage() {
   const setEditMode = useModelUiStore((state) => state.setEditMode)
   const setCheckInModalOpen = useModelUiStore((state) => state.setCheckInModalOpen)
   const setProfileModalOpen = useModelUiStore((state) => state.setProfileModalOpen)
+  const handleModelVersionsRemoved = useModelUiStore((state) => state.handleModelVersionsRemoved)
   const resetUiState = useModelUiStore((state) => state.reset)
 
   const modelListQuery = useModelList()
@@ -122,6 +174,15 @@ export function ModelPage() {
   const meQuery = useMe(true)
 
   const { deleteModelMutation, checkoutModelMutation, checkinModelMutation } = useModelMutations()
+  const {
+    createRootModelMutation,
+    updateRootModelInfoMutation,
+    createBranchModelMutation,
+    previewParentCommitMutation,
+    commitParentModelMutation,
+    deleteDeprecatedBranchesMutation,
+    deleteModelByKeyMutation,
+  } = useModelManagementMutations()
 
   const [checkInErrorMessage, setCheckInErrorMessage] = useState<string | null>(null)
   const [isLogoutPending, setIsLogoutPending] = useState(false)
@@ -129,9 +190,40 @@ export function ModelPage() {
   const [detailColumnsByContext, setDetailColumnsByContext] = useState<Record<string, string[]>>({})
   const [detailRowsByContext, setDetailRowsByContext] = useState<Record<string, ModelDetailRow[]>>({})
   const [detailMdfByContext, setDetailMdfByContext] = useState<Record<string, ModelMdfContent[]>>({})
+  const [rootModalState, setRootModalState] = useState<{
+    open: boolean
+    mode: 'create' | 'update'
+    interfaceType: ProtocolType
+    targetModel: ModelInfo | null
+  }>({
+    open: false,
+    mode: 'create',
+    interfaceType: 'SECS',
+    targetModel: null,
+  })
+  const [rootModalErrorMessage, setRootModalErrorMessage] = useState<string | null>(null)
+  const [branchCreateTargetModel, setBranchCreateTargetModel] = useState<ModelInfo | null>(null)
+  const [isBranchCreateModalOpen, setIsBranchCreateModalOpen] = useState(false)
+  const [branchCreateErrorMessage, setBranchCreateErrorMessage] = useState<string | null>(null)
+  const [parentCommitTargetModel, setParentCommitTargetModel] = useState<ModelInfo | null>(null)
+  const [isParentCommitModalOpen, setIsParentCommitModalOpen] = useState(false)
+  const [parentCommitPreviewResult, setParentCommitPreviewResult] =
+    useState<ModelParentCommitResult | null>(null)
+  const [parentCommitErrorMessage, setParentCommitErrorMessage] = useState<string | null>(null)
+  const [deleteDialogState, setDeleteDialogState] = useState<{
+    open: boolean
+    mode: ModelDeleteDialogMode
+    targetModel: ModelInfo | null
+  }>({
+    open: false,
+    mode: 'root',
+    targetModel: null,
+  })
+  const [deleteDialogErrorMessage, setDeleteDialogErrorMessage] = useState<string | null>(null)
 
   // 가운데 컨테이너 높이 계산용 ref
   const centerContainerRef = useRef<HTMLDivElement>(null)
+  const parentCommitPreviewModelKeyRef = useRef<number | null>(null)
 
   const currentUserId = meQuery.data?.userId ?? null
 
@@ -147,7 +239,7 @@ export function ModelPage() {
       (item) => item.modelVersionKey === selectedDetail.modelVersionKey,
     )
     if (!hasSelectedInList) {
-      return baseItems
+      return [selectedDetail, ...baseItems]
     }
 
     return baseItems.map((item) =>
@@ -414,6 +506,290 @@ export function ModelPage() {
     setCheckInErrorMessage(null)
   }
 
+  /**
+   * root model 생성/수정 모달을 엽니다.
+   */
+  const handleOpenRootCreate = (interfaceType: ProtocolType) => {
+    setRootModalErrorMessage(null)
+    setRootModalState({
+      open: true,
+      mode: 'create',
+      interfaceType,
+      targetModel: null,
+    })
+  }
+
+  const handleOpenRootUpdate = (model: ModelInfo) => {
+    setRootModalErrorMessage(null)
+    setRootModalState({
+      open: true,
+      mode: 'update',
+      interfaceType: model.commInterface,
+      targetModel: model,
+    })
+  }
+
+  const handleRootModalOpenChange = (open: boolean) => {
+    if (!open) {
+      setRootModalErrorMessage(null)
+    }
+
+    setRootModalState((previousState) => ({
+      ...previousState,
+      open,
+    }))
+  }
+
+  const handleSubmitRootModal = async (request: { modelName: string; maker: string | null }) => {
+    try {
+      setRootModalErrorMessage(null)
+
+      if (rootModalState.mode === 'create') {
+        const createdModel = await createRootModelMutation.mutateAsync({
+          modelName: request.modelName,
+          commInterface: rootModalState.interfaceType,
+          maker: request.maker,
+        })
+
+        setSelectedModelVersionKey(createdModel.modelVersionKey)
+      } else if (rootModalState.targetModel) {
+        const updatedModel = await updateRootModelInfoMutation.mutateAsync({
+          modelKey: rootModalState.targetModel.modelKey,
+          request: {
+            maker: request.maker,
+          },
+        })
+
+        setSelectedModelVersionKey(updatedModel.modelVersionKey)
+      }
+
+      setRootModalState((previousState) => ({
+        ...previousState,
+        open: false,
+      }))
+    } catch (error) {
+      setRootModalErrorMessage(
+        resolveErrorMessage(error, 'root model 관리 요청을 처리하지 못했습니다.'),
+      )
+    }
+  }
+
+  /**
+   * branch 생성 모달을 엽니다.
+   */
+  const handleOpenBranchCreate = (model: ModelInfo) => {
+    setBranchCreateTargetModel(model)
+    setBranchCreateErrorMessage(null)
+    setIsBranchCreateModalOpen(true)
+  }
+
+  const handleBranchCreateModalOpenChange = (open: boolean) => {
+    if (!open) {
+      setBranchCreateErrorMessage(null)
+    }
+
+    setIsBranchCreateModalOpen(open)
+  }
+
+  const handleSubmitBranchCreate = async (request: { suffix: string }) => {
+    if (!branchCreateTargetModel) {
+      return
+    }
+
+    try {
+      setBranchCreateErrorMessage(null)
+      const createdBranch = await createBranchModelMutation.mutateAsync({
+        modelKey: branchCreateTargetModel.modelKey,
+        request,
+      })
+
+      setSelectedModelVersionKey(createdBranch.modelVersionKey)
+      setIsBranchCreateModalOpen(false)
+    } catch (error) {
+      setBranchCreateErrorMessage(resolveErrorMessage(error, 'branch model 생성에 실패했습니다.'))
+    }
+  }
+
+  /**
+   * branch commit preview는 요청 순서가 뒤섞일 수 있어 마지막으로 연 modal만 반영합니다.
+   */
+  const loadParentCommitPreview = useCallback(
+    async (modelKey: number) => {
+      parentCommitPreviewModelKeyRef.current = modelKey
+      setParentCommitPreviewResult(null)
+      setParentCommitErrorMessage(null)
+
+      try {
+        const previewResult = await previewParentCommitMutation.mutateAsync(modelKey)
+        if (parentCommitPreviewModelKeyRef.current === modelKey) {
+          setParentCommitPreviewResult(previewResult)
+        }
+      } catch (error) {
+        if (parentCommitPreviewModelKeyRef.current === modelKey) {
+          setParentCommitErrorMessage(resolveErrorMessage(error, 'parent commit diff를 불러오지 못했습니다.'))
+        }
+      }
+    },
+    [previewParentCommitMutation],
+  )
+
+  const handleOpenParentCommit = (model: ModelInfo) => {
+    setParentCommitTargetModel(model)
+    setParentCommitPreviewResult(null)
+    setParentCommitErrorMessage(null)
+    setIsParentCommitModalOpen(true)
+    void loadParentCommitPreview(model.modelKey)
+  }
+
+  const handleParentCommitModalOpenChange = (open: boolean) => {
+    if (!open) {
+      parentCommitPreviewModelKeyRef.current = null
+      setParentCommitPreviewResult(null)
+      setParentCommitErrorMessage(null)
+    }
+
+    setIsParentCommitModalOpen(open)
+  }
+
+  const handleSubmitParentCommit = async (request: { newParentVersion: string }) => {
+    if (!parentCommitTargetModel) {
+      return
+    }
+
+    try {
+      setParentCommitErrorMessage(null)
+      await commitParentModelMutation.mutateAsync({
+        modelKey: parentCommitTargetModel.modelKey,
+        request: {
+          applyCommit: true,
+          newParentVersion: request.newParentVersion,
+        },
+      })
+
+      parentCommitPreviewModelKeyRef.current = null
+      setParentCommitPreviewResult(null)
+      setIsParentCommitModalOpen(false)
+    } catch (error) {
+      setParentCommitErrorMessage(resolveErrorMessage(error, 'parent commit에 실패했습니다.'))
+    }
+  }
+
+  /**
+   * root/branch/deprecated 정리 삭제 확인 다이얼로그를 엽니다.
+   */
+  const handleOpenDeleteDialog = (mode: ModelDeleteDialogMode, model: ModelInfo) => {
+    setDeleteDialogErrorMessage(null)
+    setDeleteDialogState({
+      open: true,
+      mode,
+      targetModel: model,
+    })
+  }
+
+  const handleDeleteDialogOpenChange = (open: boolean) => {
+    if (!open) {
+      setDeleteDialogErrorMessage(null)
+    }
+
+    setDeleteDialogState((previousState) => ({
+      ...previousState,
+      open,
+    }))
+  }
+
+  const handleConfirmDelete = async () => {
+    const targetModel = deleteDialogState.targetModel
+    if (!targetModel) {
+      return
+    }
+
+    try {
+      setDeleteDialogErrorMessage(null)
+
+      if (deleteDialogState.mode === 'deprecated-branches') {
+        const deleteResult = await deleteDeprecatedBranchesMutation.mutateAsync(targetModel.modelKey)
+        handleModelVersionsRemoved(
+          collectModelVersionKeysByModelKeys(modelItems, deleteResult.deletedModelKeys),
+          resolveLatestModelByName(modelItems, targetModel.modelName)?.modelVersionKey ?? null,
+        )
+      } else if (deleteDialogState.mode === 'branch') {
+        await deleteModelByKeyMutation.mutateAsync({
+          modelKey: targetModel.modelKey,
+        })
+        handleModelVersionsRemoved(
+          collectModelVersionKeysByModelKeys(modelItems, [targetModel.modelKey]),
+          resolveLatestModelByName(modelItems, targetModel.parentModel)?.modelVersionKey ?? null,
+        )
+      } else {
+        await deleteModelByKeyMutation.mutateAsync({
+          modelKey: targetModel.modelKey,
+        })
+        handleModelVersionsRemoved(
+          collectCascadeDeletedVersionKeys(modelItems, targetModel.modelName),
+          null,
+        )
+      }
+
+      setDeleteDialogState((previousState) => ({
+        ...previousState,
+        open: false,
+      }))
+    } catch (error) {
+      setDeleteDialogErrorMessage(resolveErrorMessage(error, '모델 삭제에 실패했습니다.'))
+    }
+  }
+
+  /**
+   * branch 관리 액션은 현재 같은 branch를 EDIT 상태로 열어 둔 경우 비활성화합니다.
+   */
+  const isBranchCommitDisabled = useCallback(
+    (model: ModelInfo) => {
+      if (isDeprecatedStatus(model.status)) {
+        return true
+      }
+
+      if (!isEditMode || !activeTabModel) {
+        return false
+      }
+
+      return activeTabModel.modelKey === model.modelKey
+    },
+    [activeTabModel, isEditMode],
+  )
+
+  const isBranchDeleteDisabled = useCallback(
+    (model: ModelInfo) => {
+      if (!isEditMode || !activeTabModel) {
+        return false
+      }
+
+      return activeTabModel.modelKey === model.modelKey
+    },
+    [activeTabModel, isEditMode],
+  )
+
+  const isRootDeleteDisabled = useCallback(
+    (model: ModelInfo) => {
+      if (!isEditMode || !activeTabModel) {
+        return false
+      }
+
+      return (
+        activeTabModel.modelKey === model.modelKey ||
+        activeTabModel.parentModel === model.modelName
+      )
+    },
+    [activeTabModel, isEditMode],
+  )
+
+  const isDeprecatedBranchDeleteDisabled = useCallback(
+    (model: ModelInfo) =>
+      !modelItems.some(
+        (item) => item.parentModel === model.modelName && isDeprecatedStatus(item.status),
+      ),
+    [modelItems],
+  )
+
   const handleCheckOut = async () => {
     if (!activeTabModel) {
       return
@@ -644,6 +1020,19 @@ export function ModelPage() {
           isLoading={modelListQuery.isLoading}
           errorMessage={listErrorMessage}
           onSelectModel={handleSelectModel}
+          onOpenRootCreate={handleOpenRootCreate}
+          onOpenRootUpdate={handleOpenRootUpdate}
+          onOpenBranchCreate={handleOpenBranchCreate}
+          onOpenDeleteDeprecatedBranches={(model) =>
+            handleOpenDeleteDialog('deprecated-branches', model)
+          }
+          onOpenModelDelete={(model) => handleOpenDeleteDialog('root', model)}
+          onOpenParentCommit={handleOpenParentCommit}
+          onOpenBranchDelete={(model) => handleOpenDeleteDialog('branch', model)}
+          isRootDeleteDisabled={isRootDeleteDisabled}
+          isDeprecatedBranchDeleteDisabled={isDeprecatedBranchDeleteDisabled}
+          isBranchCommitDisabled={isBranchCommitDisabled}
+          isBranchDeleteDisabled={isBranchDeleteDisabled}
           onToggleSidebar={toggleSidebar}
         />
 
@@ -723,6 +1112,55 @@ export function ModelPage() {
         onCancel={() => setCheckInModalOpen(false)}
         onUndo={() => void handleUndoCheckIn()}
         onSave={(version, description) => void handleSaveCheckIn(version, description)}
+      />
+
+      <ModelCreateOrUpdateModal
+        key={`${rootModalState.mode}-${rootModalState.interfaceType}-${rootModalState.targetModel?.modelKey ?? 'new'}-${rootModalState.open ? 'open' : 'closed'}`}
+        open={rootModalState.open}
+        mode={rootModalState.mode}
+        interfaceType={rootModalState.interfaceType}
+        targetModel={rootModalState.targetModel}
+        isPending={
+          rootModalState.mode === 'create'
+            ? createRootModelMutation.isPending
+            : updateRootModelInfoMutation.isPending
+        }
+        errorMessage={rootModalErrorMessage}
+        onOpenChange={handleRootModalOpenChange}
+        onSubmit={(request) => void handleSubmitRootModal(request)}
+      />
+
+      <BranchModelCreateModal
+        key={`${branchCreateTargetModel?.modelKey ?? 'none'}-${isBranchCreateModalOpen ? 'open' : 'closed'}`}
+        open={isBranchCreateModalOpen}
+        parentModel={branchCreateTargetModel}
+        currentUserId={currentUserId}
+        isPending={createBranchModelMutation.isPending}
+        errorMessage={branchCreateErrorMessage}
+        onOpenChange={handleBranchCreateModalOpenChange}
+        onSubmit={(request) => void handleSubmitBranchCreate(request)}
+      />
+
+      <ParentModelCommitModal
+        key={`${parentCommitTargetModel?.modelKey ?? 'none'}-${isParentCommitModalOpen ? 'open' : 'closed'}`}
+        open={isParentCommitModalOpen}
+        branchModel={parentCommitTargetModel}
+        previewResult={parentCommitPreviewResult}
+        isPreviewLoading={previewParentCommitMutation.isPending}
+        isCommitPending={commitParentModelMutation.isPending}
+        errorMessage={parentCommitErrorMessage}
+        onOpenChange={handleParentCommitModalOpenChange}
+        onCommit={(request) => void handleSubmitParentCommit(request)}
+      />
+
+      <ModelDeleteConfirmDialog
+        open={deleteDialogState.open}
+        mode={deleteDialogState.mode}
+        targetModel={deleteDialogState.targetModel}
+        isPending={deleteDeprecatedBranchesMutation.isPending || deleteModelByKeyMutation.isPending}
+        errorMessage={deleteDialogErrorMessage}
+        onOpenChange={handleDeleteDialogOpenChange}
+        onConfirm={() => void handleConfirmDelete()}
       />
 
       <UserProfileModal open={isProfileModalOpen} onClose={() => setProfileModalOpen(false)} />
