@@ -35,7 +35,6 @@ export function ResizableDivider({ onDrag }: ResizableDividerProps) {
   const handleMouseUp = useCallback(() => {
     dragStartYRef.current = null
     document.removeEventListener('mousemove', handleMouseMove)
-    document.removeEventListener('mouseup', handleMouseUp)
     // 드래그 중 텍스트 선택 방지 해제
     document.body.style.userSelect = ''
   }, [handleMouseMove])
@@ -47,7 +46,7 @@ export function ResizableDivider({ onDrag }: ResizableDividerProps) {
       // 드래그 중 텍스트 선택 방지
       document.body.style.userSelect = 'none'
       document.addEventListener('mousemove', handleMouseMove)
-      document.addEventListener('mouseup', handleMouseUp)
+      document.addEventListener('mouseup', handleMouseUp, { once: true })
     },
     [handleMouseMove, handleMouseUp],
   )
@@ -72,7 +71,7 @@ export function ResizableDivider({ onDrag }: ResizableDividerProps) {
   const handleTouchEnd = useCallback(() => {
     dragStartYRef.current = null
     document.removeEventListener('touchmove', handleTouchMove)
-    document.removeEventListener('touchend', handleTouchEnd)
+    document.body.style.userSelect = ''
   }, [handleTouchMove])
 
   const handleTouchStart = useCallback(
@@ -82,8 +81,9 @@ export function ResizableDivider({ onDrag }: ResizableDividerProps) {
         return
       }
       dragStartYRef.current = touch.clientY
+      document.body.style.userSelect = 'none'
       document.addEventListener('touchmove', handleTouchMove, { passive: false })
-      document.addEventListener('touchend', handleTouchEnd)
+      document.addEventListener('touchend', handleTouchEnd, { once: true })
     },
     [handleTouchMove, handleTouchEnd],
   )

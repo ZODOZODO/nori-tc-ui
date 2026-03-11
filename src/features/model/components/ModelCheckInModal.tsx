@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -38,24 +38,54 @@ export function ModelCheckInModal({
   onUndo,
   onSave,
 }: ModelCheckInModalProps) {
+  const formKey = `${open ? 'open' : 'closed'}:${initialVersion}`
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      if (isPending) {
+        return
+      }
+      onOpenChange(nextOpen)
+    }}>
+      {open ? (
+        <ModelCheckInModalBody
+          key={formKey}
+          initialVersion={initialVersion}
+          isPending={isPending}
+          errorMessage={errorMessage}
+          onCancel={onCancel}
+          onUndo={onUndo}
+          onSave={onSave}
+        />
+      ) : null}
+    </Dialog>
+  )
+}
+
+interface ModelCheckInModalBodyProps {
+  initialVersion: string
+  isPending: boolean
+  errorMessage: string | null
+  onCancel: () => void
+  onUndo: () => void | Promise<void>
+  onSave: (version: string, description: string) => void | Promise<void>
+}
+
+/**
+ * 모달이 열릴 때마다 새로 마운트되는 입력 본문입니다.
+ *
+ * props -> state 동기화 effect를 두지 않고, open 시점 remount로 초기값을 재설정합니다.
+ */
+function ModelCheckInModalBody({
+  initialVersion,
+  isPending,
+  errorMessage,
+  onCancel,
+  onUndo,
+  onSave,
+}: ModelCheckInModalBodyProps) {
   const [version, setVersion] = useState(initialVersion)
   const [description, setDescription] = useState('')
-
-  useEffect(() => {
-    if (!open) {
-      return
-    }
-
-    setVersion(initialVersion)
-    setDescription('')
-  }, [open, initialVersion])
-
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (isPending) {
-      return
-    }
-    onOpenChange(nextOpen)
-  }
 
   const handleSave = async () => {
     if (!version.trim()) {
@@ -69,81 +99,78 @@ export function ModelCheckInModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="z-[60] max-w-[500px] rounded-2xl" showCloseButton={!isPending}>
-        <DialogHeader>
-          <DialogTitle>Save your changes?</DialogTitle>
-          <DialogDescription>Save changes and return to Check Out mode?</DialogDescription>
-        </DialogHeader>
+    <DialogContent className="z-[60] max-w-[500px] rounded-2xl" showCloseButton={!isPending}>
+      <DialogHeader>
+        <DialogTitle>Save your changes?</DialogTitle>
+        <DialogDescription>Save changes and return to Check Out mode?</DialogDescription>
+      </DialogHeader>
 
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <label htmlFor="model-checkin-version" className="text-xs font-semibold text-[#1E3D33]">
-              Version <span className="text-[#C5534B]">*</span>
-            </label>
-            <Input
-              id="model-checkin-version"
-              value={version}
-              onChange={(event) => setVersion(event.target.value)}
-              placeholder="예: v2.2.0"
-              disabled={isPending}
-              className="h-9"
-            />
-          </div>
-
-          <div className="grid gap-1.5">
-            <label htmlFor="model-checkin-description" className="text-xs font-semibold text-[#1E3D33]">
-              Description
-            </label>
-            <textarea
-              id="model-checkin-description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="변경 내용을 입력해 주세요."
-              disabled={isPending}
-              rows={3}
-              className="resize-none rounded-lg border border-[#D8E1DB] bg-white px-3 py-2 text-xs text-[#1E3D33] placeholder-[#8A8A8A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30 disabled:cursor-not-allowed disabled:bg-[#F5F8F6]"
-            />
-          </div>
+      <div className="grid gap-3">
+        <div className="grid gap-1.5">
+          <label htmlFor="model-checkin-version" className="text-xs font-semibold text-[#1E3D33]">
+            Version <span className="text-[#C5534B]">*</span>
+          </label>
+          <Input
+            id="model-checkin-version"
+            value={version}
+            onChange={(event) => setVersion(event.target.value)}
+            placeholder="예: v2.2.0"
+            disabled={isPending}
+            className="h-9"
+          />
         </div>
 
-        {errorMessage ? (
-          <p className="rounded-md border border-[#F0D2D0] bg-[#FFF7F7] px-3 py-2 text-sm text-[#B4483F]">
-            {errorMessage}
-          </p>
-        ) : null}
+        <div className="grid gap-1.5">
+          <label htmlFor="model-checkin-description" className="text-xs font-semibold text-[#1E3D33]">
+            Description
+          </label>
+          <textarea
+            id="model-checkin-description"
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="변경 내용을 입력해 주세요."
+            disabled={isPending}
+            rows={3}
+            className="resize-none rounded-lg border border-[#D8E1DB] bg-white px-3 py-2 text-xs text-[#1E3D33] placeholder-[#8A8A8A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30 disabled:cursor-not-allowed disabled:bg-[#F5F8F6]"
+          />
+        </div>
+      </div>
 
-        <DialogFooter className="gap-2 sm:justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9 rounded-full border-[#D7E1DB] px-4 text-xs font-semibold"
-            onClick={onCancel}
-            disabled={isPending}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9 rounded-full border-[#D7E1DB] px-4 text-xs font-semibold text-[#4B5A52]"
-            onClick={() => void handleUndo()}
-            disabled={isPending}
-          >
-            Undo
-          </Button>
-          <Button
-            type="button"
-            className="h-9 rounded-full bg-[#1C7F59] px-4 text-xs font-semibold text-white hover:bg-[#166749]"
-            onClick={() => void handleSave()}
-            disabled={isPending || !version.trim()}
-          >
-            {isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {errorMessage ? (
+        <p className="rounded-md border border-[#F0D2D0] bg-[#FFF7F7] px-3 py-2 text-sm text-[#B4483F]">
+          {errorMessage}
+        </p>
+      ) : null}
+
+      <DialogFooter className="gap-2 sm:justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 rounded-full border-[#D7E1DB] px-4 text-xs font-semibold"
+          onClick={onCancel}
+          disabled={isPending}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 rounded-full border-[#D7E1DB] px-4 text-xs font-semibold text-[#4B5A52]"
+          onClick={() => void handleUndo()}
+          disabled={isPending}
+        >
+          Undo
+        </Button>
+        <Button
+          type="button"
+          className="h-9 rounded-full bg-[#1C7F59] px-4 text-xs font-semibold text-white hover:bg-[#166749]"
+          onClick={() => void handleSave()}
+          disabled={isPending || !version.trim()}
+        >
+          {isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
+          Save
+        </Button>
+      </DialogFooter>
+    </DialogContent>
   )
 }
-
