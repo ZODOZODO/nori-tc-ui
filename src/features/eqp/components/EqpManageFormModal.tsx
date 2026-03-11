@@ -1,0 +1,1136 @@
+import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react'
+import { Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { cn } from '@/lib/utils'
+import {
+  buildEqpUpdateRequest,
+  DEFAULT_EQP_LOG_SETTINGS,
+  DEFAULT_SECS_SETTINGS,
+  DEFAULT_SOCKET_SETTINGS,
+  EQP_COMM_MODE_OPTIONS,
+  EQP_LOG_LEVEL_OPTIONS,
+  EQP_SELECT_NONE_VALUE,
+  findEqpModelOptionByVersionKey,
+  getFilteredEqpModelOptions,
+  getModelNameOptions,
+  getModelVersionOptions,
+  resolveAllowedModelStatus,
+} from '../lib/eqp-management.util'
+import type {
+  EqpCreateRequest,
+  EqpManageDetail,
+  EqpManageOptions,
+  EqpUpdateRequest,
+  ProtocolType,
+} from '../types/eqp.types'
+
+type EqpManageFormMode = 'create' | 'update'
+
+interface EqpManageFormModalProps {
+  open: boolean
+  mode: EqpManageFormMode
+  interfaceType: ProtocolType
+  detail: EqpManageDetail | null
+  options: EqpManageOptions | null
+  isLoading: boolean
+  isOptionsLoading: boolean
+  isPending: boolean
+  errorMessage: string | null
+  onOpenChange: (open: boolean) => void
+  onSubmit: (request: EqpCreateRequest | EqpUpdateRequest) => void | Promise<void>
+}
+
+interface EqpManageFormState {
+  eqpId: string
+  commMode: string
+  isDev: boolean
+  routePartition: string
+  eqpIp: string
+  eqpPort: string
+  modelName: string
+  modelVersionKey: string
+  gatewayJarFileName: string
+  businessJarFileName: string
+  logLevel: string
+  logRetentionDays: string
+  logPath: string
+  deviceId: string
+  t3Timeout: string
+  t5Timeout: string
+  t6Timeout: string
+  t7Timeout: string
+  t8Timeout: string
+  linkTestEnabled: boolean
+  linkTestInterval: string
+  maxMsgBytes: string
+  socketProtocolType: string
+  charset: string
+  heartbeatEnabled: boolean
+  heartbeatInterval: string
+  readTimeout: string
+  writeTimeout: string
+  maxFrameSizeBytes: string
+  keepAliveEnabled: boolean
+}
+
+interface SectionProps {
+  title: string
+  description?: string | null
+  children: ReactNode
+}
+
+interface FieldProps {
+  label: string
+  required?: boolean
+  children: ReactNode
+  hint?: string | null
+}
+
+interface ReadOnlyFieldProps {
+  label: string
+  value: string
+  hint?: string | null
+}
+
+interface ToggleFieldProps {
+  label: string
+  checked: boolean
+  disabled: boolean
+  hint?: string | null
+  onChange: (checked: boolean) => void
+}
+
+const toFieldString = (value: string | number | null | undefined): string =>
+  value === null || value === undefined ? '' : String(value)
+
+const toSelectValue = (value: string): string | undefined => (value ? value : undefined)
+
+const resolveOptionalSelectValue = (value: string): string | null => {
+  const normalized = value.trim()
+  if (!normalized || normalized === EQP_SELECT_NONE_VALUE) {
+    return null
+  }
+  return normalized
+}
+
+const parseRequiredInteger = (
+  value: string,
+  label: string,
+  options: { min?: number; positive?: boolean } = {},
+): number => {
+  const normalized = value.trim()
+  if (!normalized) {
+    throw new Error(`${label}을(를) 입력해 주세요.`)
+  }
+
+  const parsed = Number(normalized)
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`${label}은(는) 정수로 입력해 주세요.`)
+  }
+
+  if (options.positive && parsed <= 0) {
+    throw new Error(`${label}은(는) 1 이상이어야 합니다.`)
+  }
+
+  if (typeof options.min === 'number' && parsed < options.min) {
+    throw new Error(`${label}은(는) ${options.min} 이상이어야 합니다.`)
+  }
+
+  return parsed
+}
+
+const parseOptionalInteger = (
+  value: string,
+  label: string,
+  options: { min?: number } = {},
+): number | null => {
+  const normalized = value.trim()
+  if (!normalized) {
+    return null
+  }
+
+  const parsed = Number(normalized)
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`${label}은(는) 정수로 입력해 주세요.`)
+  }
+
+  if (typeof options.min === 'number' && parsed < options.min) {
+    throw new Error(`${label}은(는) ${options.min} 이상이어야 합니다.`)
+  }
+
+  return parsed
+}
+
+const parseOptionalLong = (
+  value: string,
+  label: string,
+  options: { min?: number } = {},
+): number | null => {
+  const normalized = value.trim()
+  if (!normalized) {
+    return null
+  }
+
+  const parsed = Number(normalized)
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`${label}은(는) 정수로 입력해 주세요.`)
+  }
+
+  if (typeof options.min === 'number' && parsed < options.min) {
+    throw new Error(`${label}은(는) ${options.min} 이상이어야 합니다.`)
+  }
+
+  return parsed
+}
+
+const resolveOptionalText = (value: string): string | null => {
+  const normalized = value.trim()
+  return normalized ? normalized : null
+}
+
+const createInitialFormState = (
+  mode: EqpManageFormMode,
+  detail: EqpManageDetail | null,
+): EqpManageFormState => {
+  if (mode === 'create') {
+    return {
+      eqpId: '',
+      commMode: '',
+      isDev: false,
+      routePartition: '0',
+      eqpIp: '',
+      eqpPort: '',
+      modelName: '',
+      modelVersionKey: '',
+      gatewayJarFileName: EQP_SELECT_NONE_VALUE,
+      businessJarFileName: EQP_SELECT_NONE_VALUE,
+      logLevel: DEFAULT_EQP_LOG_SETTINGS.logLevel ?? '',
+      logRetentionDays: toFieldString(DEFAULT_EQP_LOG_SETTINGS.logRetentionDays),
+      logPath: DEFAULT_EQP_LOG_SETTINGS.logPath ?? '',
+      deviceId: toFieldString(DEFAULT_SECS_SETTINGS.deviceId),
+      t3Timeout: toFieldString(DEFAULT_SECS_SETTINGS.t3Timeout),
+      t5Timeout: toFieldString(DEFAULT_SECS_SETTINGS.t5Timeout),
+      t6Timeout: toFieldString(DEFAULT_SECS_SETTINGS.t6Timeout),
+      t7Timeout: toFieldString(DEFAULT_SECS_SETTINGS.t7Timeout),
+      t8Timeout: toFieldString(DEFAULT_SECS_SETTINGS.t8Timeout),
+      linkTestEnabled: DEFAULT_SECS_SETTINGS.linkTestEnabled ?? false,
+      linkTestInterval: toFieldString(DEFAULT_SECS_SETTINGS.linkTestInterval),
+      maxMsgBytes: toFieldString(DEFAULT_SECS_SETTINGS.maxMsgBytes),
+      socketProtocolType: DEFAULT_SOCKET_SETTINGS.socketProtocolType ?? '',
+      charset: DEFAULT_SOCKET_SETTINGS.charset ?? '',
+      heartbeatEnabled: DEFAULT_SOCKET_SETTINGS.heartbeatEnabled ?? false,
+      heartbeatInterval: toFieldString(DEFAULT_SOCKET_SETTINGS.heartbeatInterval),
+      readTimeout: toFieldString(DEFAULT_SOCKET_SETTINGS.readTimeout),
+      writeTimeout: toFieldString(DEFAULT_SOCKET_SETTINGS.writeTimeout),
+      maxFrameSizeBytes: toFieldString(DEFAULT_SOCKET_SETTINGS.maxFrameSizeBytes),
+      keepAliveEnabled: DEFAULT_SOCKET_SETTINGS.keepAliveEnabled ?? false,
+    }
+  }
+
+  return {
+    eqpId: detail?.eqpId ?? '',
+    commMode: detail?.commMode ?? '',
+    isDev: detail?.isDev ?? false,
+    routePartition: toFieldString(detail?.routePartition ?? 0),
+    eqpIp: detail?.eqpIp ?? '',
+    eqpPort: toFieldString(detail?.eqpPort),
+    modelName: detail?.modelBinding?.modelName ?? '',
+    modelVersionKey: toFieldString(detail?.modelBinding?.modelVersionKey),
+    gatewayJarFileName: detail?.jars?.gatewayJarFileName ?? EQP_SELECT_NONE_VALUE,
+    businessJarFileName: detail?.jars?.businessJarFileName ?? EQP_SELECT_NONE_VALUE,
+    logLevel: detail?.logPolicy?.logLevel ?? '',
+    logRetentionDays: toFieldString(detail?.logPolicy?.logRetentionDays),
+    logPath: detail?.logPolicy?.logPath ?? '',
+    deviceId: toFieldString(detail?.hsmsSettings?.deviceId),
+    t3Timeout: toFieldString(detail?.hsmsSettings?.t3Timeout),
+    t5Timeout: toFieldString(detail?.hsmsSettings?.t5Timeout),
+    t6Timeout: toFieldString(detail?.hsmsSettings?.t6Timeout),
+    t7Timeout: toFieldString(detail?.hsmsSettings?.t7Timeout),
+    t8Timeout: toFieldString(detail?.hsmsSettings?.t8Timeout),
+    linkTestEnabled: detail?.hsmsSettings?.linkTestEnabled ?? false,
+    linkTestInterval: toFieldString(detail?.hsmsSettings?.linkTestInterval),
+    maxMsgBytes: toFieldString(detail?.hsmsSettings?.maxMsgBytes),
+    socketProtocolType: detail?.socketSettings?.socketProtocolType ?? '',
+    charset: detail?.socketSettings?.charset ?? '',
+    heartbeatEnabled: detail?.socketSettings?.heartbeatEnabled ?? false,
+    heartbeatInterval: toFieldString(detail?.socketSettings?.heartbeatInterval),
+    readTimeout: toFieldString(detail?.socketSettings?.readTimeout),
+    writeTimeout: toFieldString(detail?.socketSettings?.writeTimeout),
+    maxFrameSizeBytes: toFieldString(detail?.socketSettings?.maxFrameSizeBytes),
+    keepAliveEnabled: detail?.socketSettings?.keepAliveEnabled ?? false,
+  }
+}
+
+function FormSection({ title, description, children }: SectionProps) {
+  return (
+    <section className="rounded-2xl border border-[#E4EAE6] bg-[#FAFCFB] p-4">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold text-[#1F2D26]">{title}</h3>
+        {description ? <p className="mt-1 text-xs text-[#65726B]">{description}</p> : null}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function Field({ label, required = false, children, hint }: FieldProps) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-semibold text-[#1E3D33]">
+        {label}
+        {required ? <span className="ml-1 text-[#C5534B]">*</span> : null}
+      </label>
+      {children}
+      {hint ? <p className="text-[11px] text-[#738078]">{hint}</p> : null}
+    </div>
+  )
+}
+
+function ReadOnlyField({ label, value, hint }: ReadOnlyFieldProps) {
+  return (
+    <Field label={label} hint={hint}>
+      <div className="flex h-11 items-center rounded-xl border border-[#E4EAE6] bg-[#F4F7F5] px-3 text-sm text-[#51605A]">
+        {value || '-'}
+      </div>
+    </Field>
+  )
+}
+
+function ToggleField({ label, checked, disabled, hint, onChange }: ToggleFieldProps) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs font-semibold text-[#1E3D33]">{label}</span>
+      <label
+        className={cn(
+          'flex min-h-11 items-center justify-between rounded-xl border border-[#D8E1DB] px-3 transition-colors',
+          disabled ? 'bg-[#F4F7F5] opacity-70' : 'bg-white',
+        )}
+      >
+        <span className="text-sm text-[#243129]">{checked ? '사용' : '미사용'}</span>
+        <span
+          className={cn(
+            'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+            checked ? 'bg-[#1C7F59]' : 'bg-[#C3CEC8]',
+          )}
+        >
+          <span
+            className={cn(
+              'inline-block size-5 rounded-full bg-white transition-transform',
+              checked ? 'translate-x-[22px]' : 'translate-x-0.5',
+            )}
+          />
+        </span>
+        <input
+          type="checkbox"
+          className="sr-only"
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+      </label>
+      {hint ? <p className="text-[11px] text-[#738078]">{hint}</p> : null}
+    </div>
+  )
+}
+
+/**
+ * EQP 생성/기본 정보 수정 모달입니다.
+ * create/update를 공통으로 처리하되, 수정 불가 필드는 모드에 따라 읽기 전용으로 표시합니다.
+ */
+export function EqpManageFormModal({
+  open,
+  mode,
+  interfaceType,
+  detail,
+  options,
+  isLoading,
+  isOptionsLoading,
+  isPending,
+  errorMessage,
+  onOpenChange,
+  onSubmit,
+}: EqpManageFormModalProps) {
+  const [formState, setFormState] = useState<EqpManageFormState>(() =>
+    createInitialFormState(mode, detail),
+  )
+  const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null)
+
+  const resolvedInterfaceType = mode === 'create' ? interfaceType : detail?.commInterface ?? interfaceType
+  const isSecsMode = resolvedInterfaceType === 'SECS'
+  const filteredModelOptions = useMemo(
+    () =>
+      mode === 'create'
+        ? getFilteredEqpModelOptions(options, resolvedInterfaceType, formState.isDev)
+        : [],
+    [mode, options, resolvedInterfaceType, formState.isDev],
+  )
+  const modelNameOptions = useMemo(
+    () => getModelNameOptions(filteredModelOptions),
+    [filteredModelOptions],
+  )
+  const modelVersionOptions = useMemo(
+    () => getModelVersionOptions(filteredModelOptions, formState.modelName),
+    [filteredModelOptions, formState.modelName],
+  )
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    setFormState(createInitialFormState(mode, detail))
+    setFormErrorMessage(null)
+  }, [open, mode, detail])
+
+  useEffect(() => {
+    if (!open || mode !== 'create') {
+      return
+    }
+
+    setFormState((previous) => {
+      if (modelNameOptions.length === 0) {
+        if (!previous.modelName && !previous.modelVersionKey) {
+          return previous
+        }
+
+        return {
+          ...previous,
+          modelName: '',
+          modelVersionKey: '',
+        }
+      }
+
+      const nextModelName = modelNameOptions.includes(previous.modelName)
+        ? previous.modelName
+        : modelNameOptions[0]
+      const nextVersionOptions = getModelVersionOptions(filteredModelOptions, nextModelName)
+      const hasSelectedVersion = nextVersionOptions.some(
+        (option) => String(option.modelVersionKey) === previous.modelVersionKey,
+      )
+      const nextModelVersionKey = hasSelectedVersion
+        ? previous.modelVersionKey
+        : toFieldString(nextVersionOptions[0]?.modelVersionKey)
+
+      if (
+        previous.modelName === nextModelName &&
+        previous.modelVersionKey === nextModelVersionKey
+      ) {
+        return previous
+      }
+
+      return {
+        ...previous,
+        modelName: nextModelName,
+        modelVersionKey: nextModelVersionKey,
+      }
+    })
+  }, [open, mode, modelNameOptions, filteredModelOptions])
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!isPending) {
+      onOpenChange(nextOpen)
+    }
+  }
+
+  const handleInputChange =
+    (fieldName: keyof EqpManageFormState) =>
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const nextValue =
+        event.target instanceof HTMLInputElement && event.target.type === 'checkbox'
+          ? event.target.checked
+          : event.target.value
+
+      setFormState((previous) => ({
+        ...previous,
+        [fieldName]: nextValue,
+      }))
+    }
+
+  const handleSelectChange =
+    (fieldName: keyof EqpManageFormState) =>
+    (value: string) => {
+      setFormState((previous) => ({
+        ...previous,
+        [fieldName]: value,
+      }))
+    }
+
+  const saveDisabled =
+    isPending ||
+    isLoading ||
+    isOptionsLoading ||
+    (mode === 'update' && !detail)
+
+  const modelSelectionHint =
+    mode === 'create'
+      ? `현재 Is Dev=${formState.isDev ? 'true' : 'false'} 이므로 ${resolveAllowedModelStatus(formState.isDev)} 모델만 노출됩니다.`
+      : null
+
+  const mergedErrorMessage = formErrorMessage ?? errorMessage
+
+  const handleSave = async () => {
+    try {
+      setFormErrorMessage(null)
+
+      if (mode === 'create') {
+        if (!formState.eqpId.trim()) {
+          throw new Error('EQP ID를 입력해 주세요.')
+        }
+
+        if (!formState.commMode) {
+          throw new Error('Comm Mode를 선택해 주세요.')
+        }
+
+        if (!formState.eqpIp.trim()) {
+          throw new Error('EQP IP를 입력해 주세요.')
+        }
+
+        const selectedModelVersionKey = parseRequiredInteger(
+          formState.modelVersionKey,
+          'Model Version',
+          { positive: true },
+        )
+        const request: EqpCreateRequest = {
+          eqpId: formState.eqpId.trim(),
+          interfaceType: resolvedInterfaceType,
+          commMode: formState.commMode,
+          isDev: formState.isDev,
+          routePartition: parseRequiredInteger(formState.routePartition, 'Route Partition', { min: 0 }),
+          eqpIp: formState.eqpIp.trim(),
+          eqpPort: parseRequiredInteger(formState.eqpPort, 'EQP Port', { positive: true }),
+          modelVersionKey: selectedModelVersionKey,
+          appliedParamVersion: null,
+          gatewayJarFileName: resolveOptionalSelectValue(formState.gatewayJarFileName),
+          businessJarFileName: resolveOptionalSelectValue(formState.businessJarFileName),
+          logSettings: {
+            logLevel: resolveOptionalText(formState.logLevel),
+            logRetentionDays: parseOptionalInteger(formState.logRetentionDays, 'Log Retention Day', { min: 0 }),
+            logPath: resolveOptionalText(formState.logPath),
+          },
+          hsmsSettings: isSecsMode
+            ? {
+                deviceId: parseOptionalInteger(formState.deviceId, 'Device ID', { min: 0 }),
+                t3Timeout: parseOptionalInteger(formState.t3Timeout, 'T3 Timeout', { min: 0 }),
+                t5Timeout: parseOptionalInteger(formState.t5Timeout, 'T5 Timeout', { min: 0 }),
+                t6Timeout: parseOptionalInteger(formState.t6Timeout, 'T6 Timeout', { min: 0 }),
+                t7Timeout: parseOptionalInteger(formState.t7Timeout, 'T7 Timeout', { min: 0 }),
+                t8Timeout: parseOptionalInteger(formState.t8Timeout, 'T8 Timeout', { min: 0 }),
+                linkTestEnabled: formState.linkTestEnabled,
+                linkTestInterval: parseOptionalInteger(formState.linkTestInterval, 'Link Test Interval', {
+                  min: 0,
+                }),
+                maxMsgBytes: parseOptionalLong(formState.maxMsgBytes, 'Max Message Bytes', { min: 0 }),
+              }
+            : null,
+          socketSettings: !isSecsMode
+            ? {
+                socketProtocolType: resolveOptionalText(formState.socketProtocolType),
+                charset: resolveOptionalText(formState.charset),
+                heartbeatEnabled: formState.heartbeatEnabled,
+                heartbeatInterval: parseOptionalInteger(formState.heartbeatInterval, 'Heartbeat Interval', {
+                  min: 0,
+                }),
+                readTimeout: parseOptionalInteger(formState.readTimeout, 'Read Timeout', { min: 0 }),
+                writeTimeout: parseOptionalInteger(formState.writeTimeout, 'Write Timeout', { min: 0 }),
+                maxFrameSizeBytes: parseOptionalInteger(formState.maxFrameSizeBytes, 'Max Frame Size', {
+                  min: 0,
+                }),
+                keepAliveEnabled: formState.keepAliveEnabled,
+              }
+            : null,
+        }
+
+        await onSubmit(request)
+        return
+      }
+
+      if (!detail) {
+        throw new Error('설비 관리 상세 정보를 불러오지 못했습니다.')
+      }
+
+      if (!formState.eqpIp.trim()) {
+        throw new Error('EQP IP를 입력해 주세요.')
+      }
+
+      const request = buildEqpUpdateRequest(detail, {
+        isDev: formState.isDev,
+        routePartition: parseRequiredInteger(formState.routePartition, 'Route Partition', { min: 0 }),
+        eqpIp: formState.eqpIp.trim(),
+        eqpPort: parseRequiredInteger(formState.eqpPort, 'EQP Port', { positive: true }),
+        gatewayJarFileName: resolveOptionalSelectValue(formState.gatewayJarFileName),
+        logSettings: {
+          logLevel: resolveOptionalText(formState.logLevel),
+          logRetentionDays: parseOptionalInteger(formState.logRetentionDays, 'Log Retention Day', { min: 0 }),
+          logPath: resolveOptionalText(formState.logPath),
+        },
+        hsmsSettings: isSecsMode
+          ? {
+              deviceId: parseOptionalInteger(formState.deviceId, 'Device ID', { min: 0 }),
+              t3Timeout: parseOptionalInteger(formState.t3Timeout, 'T3 Timeout', { min: 0 }),
+              t5Timeout: parseOptionalInteger(formState.t5Timeout, 'T5 Timeout', { min: 0 }),
+              t6Timeout: parseOptionalInteger(formState.t6Timeout, 'T6 Timeout', { min: 0 }),
+              t7Timeout: parseOptionalInteger(formState.t7Timeout, 'T7 Timeout', { min: 0 }),
+              t8Timeout: parseOptionalInteger(formState.t8Timeout, 'T8 Timeout', { min: 0 }),
+              linkTestEnabled: formState.linkTestEnabled,
+              linkTestInterval: parseOptionalInteger(formState.linkTestInterval, 'Link Test Interval', {
+                min: 0,
+              }),
+              maxMsgBytes: parseOptionalLong(formState.maxMsgBytes, 'Max Message Bytes', { min: 0 }),
+            }
+          : null,
+        socketSettings: !isSecsMode
+          ? {
+              socketProtocolType: resolveOptionalText(formState.socketProtocolType),
+              charset: resolveOptionalText(formState.charset),
+              heartbeatEnabled: formState.heartbeatEnabled,
+              heartbeatInterval: parseOptionalInteger(formState.heartbeatInterval, 'Heartbeat Interval', {
+                min: 0,
+              }),
+              readTimeout: parseOptionalInteger(formState.readTimeout, 'Read Timeout', { min: 0 }),
+              writeTimeout: parseOptionalInteger(formState.writeTimeout, 'Write Timeout', { min: 0 }),
+              maxFrameSizeBytes: parseOptionalInteger(formState.maxFrameSizeBytes, 'Max Frame Size', {
+                min: 0,
+              }),
+              keepAliveEnabled: formState.keepAliveEnabled,
+            }
+          : null,
+      })
+
+      await onSubmit(request)
+    } catch (error) {
+      setFormErrorMessage(error instanceof Error ? error.message : '입력값을 다시 확인해 주세요.')
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="z-[60] max-h-[90vh] max-w-[920px] overflow-hidden rounded-2xl p-0" showCloseButton={!isPending}>
+        <div className="flex max-h-[90vh] flex-col">
+          <DialogHeader className="border-b border-[#E4EAE6] px-6 py-5">
+            <DialogTitle>{mode === 'create' ? `${resolvedInterfaceType} Eqp Create` : 'Eqp Info Update'}</DialogTitle>
+            <DialogDescription>
+              {mode === 'create'
+                ? '새 EQP를 등록하고 기본 통신/로그 설정을 함께 저장합니다.'
+                : '기본 EQP 정보와 프로토콜별 통신 설정을 수정합니다.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto px-6 py-5">
+            {mode === 'update' && isLoading && !detail ? (
+              <div className="flex min-h-60 items-center justify-center text-sm text-[#65726B]">
+                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+                설비 관리 정보를 불러오는 중입니다.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <FormSection
+                  title="공통 정보"
+                  description="EQP 기본 식별자와 연결 정책을 설정합니다."
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {mode === 'create' ? (
+                      <Field label="EQP ID" required>
+                        <Input
+                          value={formState.eqpId}
+                          onChange={handleInputChange('eqpId')}
+                          disabled={isPending}
+                          placeholder="예: EQP-01"
+                          className="h-11"
+                        />
+                      </Field>
+                    ) : (
+                      <ReadOnlyField label="EQP ID" value={formState.eqpId} />
+                    )}
+
+                    <ReadOnlyField label="Comm Interface" value={resolvedInterfaceType} />
+
+                    {mode === 'create' ? (
+                      <Field label="Comm Mode" required>
+                        <Select
+                          value={toSelectValue(formState.commMode)}
+                          onValueChange={handleSelectChange('commMode')}
+                          disabled={isPending}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Comm Mode를 선택해 주세요." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {EQP_COMM_MODE_OPTIONS.map((commMode) => (
+                              <SelectItem key={commMode} value={commMode}>
+                                {commMode}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                    ) : (
+                      <ReadOnlyField label="Comm Mode" value={formState.commMode} />
+                    )}
+
+                    <ToggleField
+                      label="Is Dev"
+                      checked={formState.isDev}
+                      disabled={isPending}
+                      hint="개발 장비면 DEVELOP 모델, 운영 장비면 OPERATE 모델과 연결해야 합니다."
+                      onChange={(checked) =>
+                        setFormState((previous) => ({
+                          ...previous,
+                          isDev: checked,
+                        }))
+                      }
+                    />
+
+                    <Field label="Route Partition" required>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={formState.routePartition}
+                        onChange={handleInputChange('routePartition')}
+                        disabled={isPending}
+                        placeholder="0"
+                        className="h-11"
+                      />
+                    </Field>
+
+                    <Field label="EQP IP" required>
+                      <Input
+                        value={formState.eqpIp}
+                        onChange={handleInputChange('eqpIp')}
+                        disabled={isPending}
+                        placeholder="예: 127.0.0.1"
+                        className="h-11"
+                      />
+                    </Field>
+
+                    <Field label="EQP Port" required>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={formState.eqpPort}
+                        onChange={handleInputChange('eqpPort')}
+                        disabled={isPending}
+                        placeholder="예: 5000"
+                        className="h-11"
+                      />
+                    </Field>
+
+                    <Field label="Gateway Jar">
+                      <Select
+                        value={toSelectValue(formState.gatewayJarFileName)}
+                        onValueChange={handleSelectChange('gatewayJarFileName')}
+                        disabled={isPending || isOptionsLoading}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Gateway Jar를 선택해 주세요." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={EQP_SELECT_NONE_VALUE}>미선택</SelectItem>
+                          {(options?.gatewayJarFileNames ?? []).map((fileName) => (
+                            <SelectItem key={fileName} value={fileName}>
+                              {fileName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                </FormSection>
+
+                {mode === 'create' ? (
+                  <FormSection
+                    title="Model / Business"
+                    description="생성 시점에 연결할 모델 버전과 Business Jar를 선택합니다."
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Field label="Model Name" required hint={modelSelectionHint}>
+                        <Select
+                          value={toSelectValue(formState.modelName)}
+                          onValueChange={handleSelectChange('modelName')}
+                          disabled={isPending || isOptionsLoading || modelNameOptions.length === 0}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Model Name을 선택해 주세요." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {modelNameOptions.map((modelName) => (
+                              <SelectItem key={modelName} value={modelName}>
+                                {modelName}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+
+                      <Field label="Model Version" required>
+                        <Select
+                          value={toSelectValue(formState.modelVersionKey)}
+                          onValueChange={handleSelectChange('modelVersionKey')}
+                          disabled={isPending || isOptionsLoading || modelVersionOptions.length === 0}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Model Version을 선택해 주세요." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {modelVersionOptions.map((option) => (
+                              <SelectItem
+                                key={option.modelVersionKey}
+                                value={String(option.modelVersionKey)}
+                              >
+                                {`${option.modelVersion} (${option.status})`}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+
+                      <Field label="Business Jar">
+                        <Select
+                          value={toSelectValue(formState.businessJarFileName)}
+                          onValueChange={handleSelectChange('businessJarFileName')}
+                          disabled={isPending || isOptionsLoading}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Business Jar를 선택해 주세요." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={EQP_SELECT_NONE_VALUE}>미선택</SelectItem>
+                            {(options?.businessJarFileNames ?? []).map((fileName) => (
+                              <SelectItem key={fileName} value={fileName}>
+                                {fileName}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+
+                      <ReadOnlyField
+                        label="선택 상태"
+                        value={
+                          findEqpModelOptionByVersionKey(
+                            modelVersionOptions,
+                            Number(formState.modelVersionKey),
+                          )?.status ?? '-'
+                        }
+                        hint="is_dev 값과 일치하는 모델만 선택할 수 있습니다."
+                      />
+                    </div>
+
+                    {modelNameOptions.length === 0 ? (
+                      <p className="mt-3 rounded-xl border border-[#F0D9C7] bg-[#FFF7F1] px-3 py-2 text-sm text-[#A7662B]">
+                        현재 조건에 맞는 model/version 옵션이 없습니다. is_dev 또는 모델 데이터를 확인해 주세요.
+                      </p>
+                    ) : null}
+                  </FormSection>
+                ) : null}
+
+                <FormSection
+                  title="Log Policy"
+                  description="EQP 로그 레벨과 기본 보관 정책을 관리합니다."
+                >
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <Field label="Log Level">
+                      <Select
+                        value={toSelectValue(formState.logLevel)}
+                        onValueChange={handleSelectChange('logLevel')}
+                        disabled={isPending}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Log Level을 선택해 주세요." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {EQP_LOG_LEVEL_OPTIONS.map((logLevel) => (
+                            <SelectItem key={logLevel} value={logLevel}>
+                              {logLevel}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+
+                    <Field label="Log Retention Day">
+                      <Input
+                        type="number"
+                        min={0}
+                        value={formState.logRetentionDays}
+                        onChange={handleInputChange('logRetentionDays')}
+                        disabled={isPending}
+                        placeholder="예: 7"
+                        className="h-11"
+                      />
+                    </Field>
+
+                    <Field label="Log Path">
+                      <Input
+                        value={formState.logPath}
+                        onChange={handleInputChange('logPath')}
+                        disabled={isPending}
+                        placeholder="예: \\"
+                        className="h-11"
+                      />
+                    </Field>
+                  </div>
+                </FormSection>
+
+                {isSecsMode ? (
+                  <FormSection
+                    title="SECS Settings"
+                    description="SECS/HSMS 연결에 필요한 timeout 및 link test 옵션입니다."
+                  >
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <Field label="Device ID">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.deviceId}
+                          onChange={handleInputChange('deviceId')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="T3 Timeout">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.t3Timeout}
+                          onChange={handleInputChange('t3Timeout')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="T5 Timeout">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.t5Timeout}
+                          onChange={handleInputChange('t5Timeout')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="T6 Timeout">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.t6Timeout}
+                          onChange={handleInputChange('t6Timeout')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="T7 Timeout">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.t7Timeout}
+                          onChange={handleInputChange('t7Timeout')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="T8 Timeout">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.t8Timeout}
+                          onChange={handleInputChange('t8Timeout')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="Link Test Interval">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.linkTestInterval}
+                          onChange={handleInputChange('linkTestInterval')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="Max Message Bytes">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.maxMsgBytes}
+                          onChange={handleInputChange('maxMsgBytes')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <ToggleField
+                        label="Link Test Enabled"
+                        checked={formState.linkTestEnabled}
+                        disabled={isPending}
+                        onChange={(checked) =>
+                          setFormState((previous) => ({
+                            ...previous,
+                            linkTestEnabled: checked,
+                          }))
+                        }
+                      />
+                    </div>
+                  </FormSection>
+                ) : (
+                  <FormSection
+                    title="Socket Settings"
+                    description="Socket 통신에서 사용하는 프로토콜, heartbeat, timeout 옵션입니다."
+                  >
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <Field label="Socket Protocol Type">
+                        <Select
+                          value={toSelectValue(formState.socketProtocolType)}
+                          onValueChange={handleSelectChange('socketProtocolType')}
+                          disabled={isPending || isOptionsLoading}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Socket Protocol Type을 선택해 주세요." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(options?.socketProtocolTypes ?? []).map((protocolType) => (
+                              <SelectItem key={protocolType} value={protocolType}>
+                                {protocolType}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+
+                      <Field label="Charset">
+                        <Input
+                          value={formState.charset}
+                          onChange={handleInputChange('charset')}
+                          disabled={isPending}
+                          placeholder="예: UTF-8"
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="Heartbeat Interval">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.heartbeatInterval}
+                          onChange={handleInputChange('heartbeatInterval')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="Read Timeout">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.readTimeout}
+                          onChange={handleInputChange('readTimeout')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="Write Timeout">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.writeTimeout}
+                          onChange={handleInputChange('writeTimeout')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <Field label="Max Frame Size">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={formState.maxFrameSizeBytes}
+                          onChange={handleInputChange('maxFrameSizeBytes')}
+                          disabled={isPending}
+                          className="h-11"
+                        />
+                      </Field>
+
+                      <ToggleField
+                        label="Heartbeat Enabled"
+                        checked={formState.heartbeatEnabled}
+                        disabled={isPending}
+                        onChange={(checked) =>
+                          setFormState((previous) => ({
+                            ...previous,
+                            heartbeatEnabled: checked,
+                          }))
+                        }
+                      />
+
+                      <ToggleField
+                        label="Keep Alive Enabled"
+                        checked={formState.keepAliveEnabled}
+                        disabled={isPending}
+                        onChange={(checked) =>
+                          setFormState((previous) => ({
+                            ...previous,
+                            keepAliveEnabled: checked,
+                          }))
+                        }
+                      />
+                    </div>
+                  </FormSection>
+                )}
+
+                {mergedErrorMessage ? (
+                  <p className="rounded-xl border border-[#F0D2D0] bg-[#FFF7F7] px-3 py-2 text-sm text-[#B4483F]">
+                    {mergedErrorMessage}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t border-[#E4EAE6] px-6 py-4 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 rounded-full border-[#D7E1DB] px-4 text-xs font-semibold"
+              onClick={() => onOpenChange(false)}
+              disabled={isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="h-10 rounded-full bg-[#1C7F59] px-4 text-xs font-semibold text-white hover:bg-[#166749]"
+              onClick={() => void handleSave()}
+              disabled={saveDisabled}
+            >
+              {isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}

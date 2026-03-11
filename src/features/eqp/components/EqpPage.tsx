@@ -4,8 +4,12 @@ import { CircleUserRound, Loader2, LogOut } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { CheckInModal } from './CheckInModal'
+import { EqpDeleteConfirmDialog } from './EqpDeleteConfirmDialog'
 import { EqpInfoTable } from './EqpInfoTable'
+import { EqpManageFormModal } from './EqpManageFormModal'
+import { EqpModelBindingModal } from './EqpModelBindingModal'
 import { EqpParamTable } from './EqpParamTable'
+import { EqpParamVersionModal } from './EqpParamVersionModal'
 import { EqpSidebar } from './EqpSidebar'
 import { GatewayGroupTable } from './GatewayGroupTable'
 import { ResizableDivider } from './ResizableDivider'
@@ -16,11 +20,21 @@ import { useEqpModelInfo } from '../hooks/useEqpModelInfo'
 import { useEqpParamVersions } from '../hooks/useEqpParamVersions'
 import { useEqpRuntimeState } from '../hooks/useEqpRuntimeState'
 import { useEqpCheckoutStatus } from '../hooks/useEqpCheckoutStatus'
+import { useEqpManageDetail } from '../hooks/useEqpManageDetail'
+import { useEqpManageOptions } from '../hooks/useEqpManageOptions'
+import { useEqpMutations } from '../hooks/useEqpMutations'
 import { useEqpParams } from '../hooks/useEqpParams'
 import { useEqpParamMutations } from '../hooks/useEqpParamMutations'
 import { eqpQueryKeys, invalidateEqpSelectionQueries } from '../lib/eqp-query-keys'
 import { useEqpUiStore } from '../stores/eqp-ui.store'
-import { EqpApiError, type EqpInfo, type EqpParamRow } from '../types/eqp.types'
+import {
+  EqpApiError,
+  type EqpCreateRequest,
+  type EqpInfo,
+  type EqpParamRow,
+  type EqpUpdateRequest,
+  type ProtocolType,
+} from '../types/eqp.types'
 import { groupEqpItems } from '../utils/eqp-group.util'
 import { UserProfileModal } from '@/features/profile/components/UserProfileModal'
 
@@ -37,6 +51,16 @@ const SIDEBAR_COLLAPSED_WIDTH_PX = 56
 const PANEL_MIN_PERCENT = 15
 const PANEL_MAX_PERCENT = 85
 const PANEL_INITIAL_TOP_PERCENT = 35
+
+type EqpManagementDialogState =
+  | { type: 'none' }
+  | { type: 'create'; interfaceType: ProtocolType }
+  | { type: 'info'; eqpId: string }
+  | { type: 'model'; eqpId: string }
+  | { type: 'param'; eqpId: string }
+  | { type: 'delete'; eqpId: string }
+
+const EMPTY_MANAGEMENT_DIALOG_STATE: EqpManagementDialogState = { type: 'none' }
 
 /**
  * 상단 네비게이션 메뉴 구성입니다.
@@ -160,6 +184,10 @@ export function EqpPage() {
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false)
   const [checkInErrorMessage, setCheckInErrorMessage] = useState<string | null>(null)
   const [isLogoutPending, setIsLogoutPending] = useState(false)
+  const [managementDialog, setManagementDialog] = useState<EqpManagementDialogState>(
+    EMPTY_MANAGEMENT_DIALOG_STATE,
+  )
+  const [managementErrorMessage, setManagementErrorMessage] = useState<string | null>(null)
 
   // ResizableDivider 상단 패널 높이 비율 (%)
   const [topPanelHeightPercent, setTopPanelHeightPercent] = useState(PANEL_INITIAL_TOP_PERCENT)
@@ -169,6 +197,7 @@ export function EqpPage() {
   const [isCheckoutSubmitting, setIsCheckoutSubmitting] = useState(false)
   const isCheckoutSubmittingRef = useRef(false)
 
+  const { createEqpMutation, updateEqpMutation, deleteEqpMutation } = useEqpMutations()
   const { checkoutMutation, saveEditParamsMutation, checkinMutation } = useEqpParamMutations()
   const eqpItems = useMemo(() => resolveEqpItems(eqpListQuery.data as unknown), [eqpListQuery.data])
   // "EDIT"은 체크아웃 잠금용 내부 버전이므로 드롭다운에서 제외합니다.
@@ -198,6 +227,27 @@ export function EqpPage() {
     return group?.items ?? []
   }, [selection, gatewayGroups])
 
+  const managementTargetEqpId =
+    managementDialog.type === 'info' ||
+    managementDialog.type === 'model' ||
+    managementDialog.type === 'param' ||
+    managementDialog.type === 'delete'
+      ? managementDialog.eqpId
+      : null
+
+  const needsManageDetail =
+    managementDialog.type === 'info' ||
+    managementDialog.type === 'model' ||
+    managementDialog.type === 'param' ||
+    managementDialog.type === 'delete'
+  const needsManageOptions =
+    managementDialog.type === 'create' ||
+    managementDialog.type === 'info' ||
+    managementDialog.type === 'model'
+
+  const eqpManageDetailQuery = useEqpManageDetail(managementTargetEqpId, needsManageDetail)
+  const eqpManageOptionsQuery = useEqpManageOptions(needsManageOptions)
+
   // gateway_group 선택 시 그룹명 파생
   const selectedGroupName = useMemo(() => {
     if (selection.type !== 'gateway_group') {
@@ -205,6 +255,45 @@ export function EqpPage() {
     }
     return `gateway_app${selection.groupIndex}`
   }, [selection])
+
+  const resetSelectionTransientStates = useCallback(() => {
+    clearSelection()
+    setAppliedVersion(EMPTY_VERSION_VALUE)
+    setEditMode(false)
+    setLocalEditRows([])
+    setIsCheckInModalOpen(false)
+    setCheckInErrorMessage(null)
+  }, [clearSelection, setEditMode])
+
+  const closeManagementDialog = useCallback(() => {
+    setManagementDialog(EMPTY_MANAGEMENT_DIALOG_STATE)
+    setManagementErrorMessage(null)
+  }, [])
+
+  const openEqpCreateDialog = useCallback((interfaceType: ProtocolType) => {
+    setManagementErrorMessage(null)
+    setManagementDialog({ type: 'create', interfaceType })
+  }, [])
+
+  const openEqpInfoDialog = useCallback((eqpId: string) => {
+    setManagementErrorMessage(null)
+    setManagementDialog({ type: 'info', eqpId })
+  }, [])
+
+  const openEqpModelDialog = useCallback((eqpId: string) => {
+    setManagementErrorMessage(null)
+    setManagementDialog({ type: 'model', eqpId })
+  }, [])
+
+  const openEqpParamDialog = useCallback((eqpId: string) => {
+    setManagementErrorMessage(null)
+    setManagementDialog({ type: 'param', eqpId })
+  }, [])
+
+  const openEqpDeleteDialog = useCallback((eqpId: string) => {
+    setManagementErrorMessage(null)
+    setManagementDialog({ type: 'delete', eqpId })
+  }, [])
 
   /**
    * sessionStorage에서 복원된 선택 상태가 현재 목록과 불일치하면 선택을 정리합니다.
@@ -215,19 +304,10 @@ export function EqpPage() {
       return
     }
 
-    const resetTransientStates = () => {
-      clearSelection()
-      setAppliedVersion(EMPTY_VERSION_VALUE)
-      setEditMode(false)
-      setLocalEditRows([])
-      setIsCheckInModalOpen(false)
-      setCheckInErrorMessage(null)
-    }
-
     if (selection.type === 'eqp') {
       const existsSelectedEqp = eqpItems.some((item) => item.eqpId === selection.eqpId)
       if (!existsSelectedEqp) {
-        resetTransientStates()
+        resetSelectionTransientStates()
       }
       return
     }
@@ -235,10 +315,26 @@ export function EqpPage() {
     if (selection.type === 'gateway_group') {
       const existsSelectedGroup = gatewayGroups.some((group) => group.appIndex === selection.groupIndex)
       if (!existsSelectedGroup) {
-        resetTransientStates()
+        resetSelectionTransientStates()
       }
     }
-  }, [eqpListQuery.isSuccess, selection, eqpItems, gatewayGroups, clearSelection, setEditMode])
+  }, [eqpListQuery.isSuccess, selection, eqpItems, gatewayGroups, resetSelectionTransientStates])
+
+  useEffect(() => {
+    if (!eqpListQuery.isSuccess || !managementTargetEqpId) {
+      return
+    }
+
+    const existsTargetEqp = eqpItems.some((item) => item.eqpId === managementTargetEqpId)
+    if (!existsTargetEqp) {
+      closeManagementDialog()
+    }
+  }, [
+    closeManagementDialog,
+    eqpItems,
+    eqpListQuery.isSuccess,
+    managementTargetEqpId,
+  ])
 
   /**
    * 편집 모드가 활성화되면 EDIT 파라미터를 로컬 편집 행으로 동기화합니다.
@@ -320,6 +416,54 @@ export function EqpPage() {
     void queryClient.invalidateQueries({ queryKey: eqpQueryKeys.list() })
     selectGatewayGroup(groupIndex)
   }, [queryClient, selectGatewayGroup])
+
+  const handleSaveCreateEqp = async (request: EqpCreateRequest) => {
+    try {
+      setManagementErrorMessage(null)
+      await createEqpMutation.mutateAsync(request)
+      closeManagementDialog()
+      handleSelectEqp(request.eqpId)
+    } catch (error) {
+      setManagementErrorMessage(resolveErrorMessage(error, '설비 등록에 실패했습니다.'))
+    }
+  }
+
+  const handleSaveEqpUpdate = async (request: EqpUpdateRequest) => {
+    if (!managementTargetEqpId) {
+      setManagementErrorMessage('선택된 설비 정보가 없어 저장할 수 없습니다.')
+      return
+    }
+
+    try {
+      setManagementErrorMessage(null)
+      await updateEqpMutation.mutateAsync({
+        eqpId: managementTargetEqpId,
+        request,
+      })
+      closeManagementDialog()
+    } catch (error) {
+      setManagementErrorMessage(resolveErrorMessage(error, '설비 수정에 실패했습니다.'))
+    }
+  }
+
+  const handleDeleteEqp = async () => {
+    if (managementDialog.type !== 'delete') {
+      return
+    }
+
+    try {
+      setManagementErrorMessage(null)
+      await deleteEqpMutation.mutateAsync({ eqpId: managementDialog.eqpId })
+
+      if (selectedEqpId === managementDialog.eqpId) {
+        resetSelectionTransientStates()
+      }
+
+      closeManagementDialog()
+    } catch (error) {
+      setManagementErrorMessage(resolveErrorMessage(error, '설비 삭제에 실패했습니다.'))
+    }
+  }
 
   /**
    * ResizableDivider 드래그 처리.
@@ -449,12 +593,8 @@ export function EqpPage() {
       console.warn('[EqpPage] logout request failed, continuing with local cleanup', error)
     } finally {
       setProfileModalOpen(false)
-      clearSelection()
-      setAppliedVersion(EMPTY_VERSION_VALUE)
-      setEditMode(false)
-      setLocalEditRows([])
-      setIsCheckInModalOpen(false)
-      setCheckInErrorMessage(null)
+      resetSelectionTransientStates()
+      closeManagementDialog()
       queryClient.clear()
       clearCsrfCookie()
       navigate(LOGIN_ROUTE, { replace: true })
@@ -503,6 +643,14 @@ export function EqpPage() {
   const versionErrorMessage = eqpParamVersionsQuery.error
     ? resolveErrorMessage(eqpParamVersionsQuery.error, '버전 목록을 불러오지 못했습니다.')
     : null
+  const managementDetailErrorMessage = needsManageDetail && eqpManageDetailQuery.error
+    ? resolveErrorMessage(eqpManageDetailQuery.error, '설비 관리 상세 정보를 불러오지 못했습니다.')
+    : null
+  const managementOptionsErrorMessage = needsManageOptions && eqpManageOptionsQuery.error
+    ? resolveErrorMessage(eqpManageOptionsQuery.error, '설비 관리 옵션을 불러오지 못했습니다.')
+    : null
+  const managementModalErrorMessage =
+    managementErrorMessage ?? managementDetailErrorMessage ?? managementOptionsErrorMessage
 
   // Check Out 버튼 비활성화: 설비 정보 없거나 다른 사용자가 이미 체크아웃 중인 경우
   // appliedVersion 없어도 (버전 없는 신규 설비) 체크아웃 가능 → !appliedVersion 조건 제거
@@ -606,6 +754,11 @@ export function EqpPage() {
           errorMessage={listErrorMessage}
           onSelectEqp={handleSelectEqp}
           onSelectGatewayGroup={handleSelectGatewayGroup}
+          onOpenEqpInfoUpdate={openEqpInfoDialog}
+          onOpenEqpModelBinding={openEqpModelDialog}
+          onOpenEqpParamVersion={openEqpParamDialog}
+          onOpenEqpDelete={openEqpDeleteDialog}
+          onOpenEqpCreate={openEqpCreateDialog}
           onToggleSidebar={toggleSidebar}
         />
 
@@ -760,6 +913,75 @@ export function EqpPage() {
         onOpenChange={setIsCheckInModalOpen}
         onSave={(version, description) => void handleCheckInSave(version, description)}
         onCancel={() => setIsCheckInModalOpen(false)}
+      />
+
+      <EqpManageFormModal
+        open={managementDialog.type === 'create' || managementDialog.type === 'info'}
+        mode={managementDialog.type === 'create' ? 'create' : 'update'}
+        interfaceType={
+          managementDialog.type === 'create'
+            ? managementDialog.interfaceType
+            : eqpManageDetailQuery.data?.commInterface ?? 'SECS'
+        }
+        detail={managementDialog.type === 'info' ? eqpManageDetailQuery.data ?? null : null}
+        options={eqpManageOptionsQuery.data ?? null}
+        isLoading={managementDialog.type === 'info' ? eqpManageDetailQuery.isLoading : false}
+        isOptionsLoading={eqpManageOptionsQuery.isLoading}
+        isPending={createEqpMutation.isPending || updateEqpMutation.isPending}
+        errorMessage={managementModalErrorMessage}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeManagementDialog()
+          }
+        }}
+        onSubmit={(request) =>
+          managementDialog.type === 'create'
+            ? handleSaveCreateEqp(request as EqpCreateRequest)
+            : handleSaveEqpUpdate(request as EqpUpdateRequest)
+        }
+      />
+
+      <EqpModelBindingModal
+        open={managementDialog.type === 'model'}
+        detail={managementDialog.type === 'model' ? eqpManageDetailQuery.data ?? null : null}
+        options={eqpManageOptionsQuery.data ?? null}
+        isLoading={eqpManageDetailQuery.isLoading}
+        isOptionsLoading={eqpManageOptionsQuery.isLoading}
+        isPending={updateEqpMutation.isPending}
+        errorMessage={managementModalErrorMessage}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeManagementDialog()
+          }
+        }}
+        onSubmit={handleSaveEqpUpdate}
+      />
+
+      <EqpParamVersionModal
+        open={managementDialog.type === 'param'}
+        detail={managementDialog.type === 'param' ? eqpManageDetailQuery.data ?? null : null}
+        isLoading={eqpManageDetailQuery.isLoading}
+        isPending={updateEqpMutation.isPending}
+        errorMessage={managementModalErrorMessage}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeManagementDialog()
+          }
+        }}
+        onSubmit={handleSaveEqpUpdate}
+      />
+
+      <EqpDeleteConfirmDialog
+        open={managementDialog.type === 'delete'}
+        eqpId={managementDialog.type === 'delete' ? managementDialog.eqpId : null}
+        isPending={deleteEqpMutation.isPending}
+        errorMessage={managementModalErrorMessage}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeManagementDialog()
+          }
+        }}
+        onConfirm={handleDeleteEqp}
       />
 
       <UserProfileModal open={isProfileModalOpen} onClose={() => setProfileModalOpen(false)} />
