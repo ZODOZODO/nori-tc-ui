@@ -45,6 +45,36 @@ export interface EqpRuntimeState {
   connectionState: string | null
 }
 
+// =========================================================================
+// EQP 선택 상태 모델
+// =========================================================================
+
+/**
+ * EQP 페이지의 선택 상태를 표현하는 유니온 타입입니다.
+ * - none: 초기 진입 또는 선택 없음
+ * - gateway_group: gateway_app 그룹 선택 (해당 그룹의 설비 목록 테이블 표시)
+ * - eqp: 개별 설비 선택 (설비 정보 + 파라미터/Checkout 영역 표시)
+ */
+export type EqpSelection =
+  | { type: 'none' }
+  | { type: 'gateway_group'; groupIndex: number }
+  | { type: 'eqp'; eqpId: string }
+
+// =========================================================================
+// 사이드바 그룹 모델
+// =========================================================================
+
+/**
+ * gateway_app 그룹 모델입니다.
+ * route_partition을 2개씩 묶어 그룹화합니다.
+ * 예: [0,1] → gateway_app1, [2,3] → gateway_app2
+ */
+export interface GatewayAppGroup {
+  appIndex: number
+  appName: string
+  items: EqpInfo[]
+}
+
 /**
  * 페이지네이션된 설비 목록 payload 입니다.
  */

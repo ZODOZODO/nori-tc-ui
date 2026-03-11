@@ -94,12 +94,12 @@ export function EqpInfoTable({
   const commInterfaceBadgeVariant = eqp?.commInterface === 'HSMS' ? 'info' : 'warning'
 
   return (
-    <section className="rounded-2xl border border-[#E4EAE6] bg-white p-4">
+    <section className="flex h-full min-h-0 flex-col rounded-2xl border border-[#E4EAE6] bg-white p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-base font-semibold text-[#213028]">설비 정보</h2>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="min-h-0 flex-1 overflow-auto">
         <Table className="min-w-[1180px]">
           <TableHeader>
             <TableRow className="bg-[#F6F9F7]">
@@ -128,7 +128,7 @@ export function EqpInfoTable({
               </TableRow>
             ) : eqp ? (
               <TableRow data-state="selected">
-                <TableCell className="font-semibold">{eqp.eqpId}</TableCell>
+                <TableCell>{eqp.eqpId}</TableCell>
                 <TableCell>
                   <Badge variant={commInterfaceBadgeVariant}>{eqp.commInterface}</Badge>
                 </TableCell>

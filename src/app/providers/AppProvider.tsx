@@ -7,6 +7,9 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 1000 * 60 * 5, // 5분간 캐시 유지
       retry: 1,                  // 실패 시 1회 재시도
+      // 창 포커스 전환 시 자동 refetch 비활성화
+      // staleTime=0 쿼리가 많아 포커스마다 401이 발생하면 /login 리다이렉트로 선택 상태가 초기화됨
+      refetchOnWindowFocus: false,
     },
   },
 })

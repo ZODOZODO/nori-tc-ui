@@ -18,12 +18,12 @@ export function EqpParamTable({
   onChangeValue,
 }: EqpParamTableProps) {
   return (
-    <div className="space-y-3">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold text-[#213028]">설비 파라미터</h2>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-[#DCE5DB]">
+      <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-[#DCE5DB]">
         <Table className="min-w-[740px]">
           <TableHeader>
             <TableRow className="bg-[#66706B] [&>th]:text-[#F5F7F4]">
@@ -42,7 +42,7 @@ export function EqpParamTable({
             ) : (
               rows.map((row) => (
                 <TableRow key={row.paramName}>
-                  <TableCell className="font-medium">{row.paramName}</TableCell>
+                  <TableCell>{row.paramName}</TableCell>
                   <TableCell>
                     {isEditMode ? (
                       <Input

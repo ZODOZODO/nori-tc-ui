@@ -9,5 +9,7 @@ export function useEqpList() {
   return useQuery({
     queryKey: ['eqp', 'list'],
     queryFn: () => eqpApi.getEqpList(0, 500),
+    // 다른 사용자의 EQP 추가/수정 반영을 위해 60초로 단축 (기존 5분)
+    staleTime: 60_000,
   })
 }

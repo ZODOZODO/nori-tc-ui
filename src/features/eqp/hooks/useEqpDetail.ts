@@ -10,5 +10,7 @@ export function useEqpDetail(eqpId: string | null) {
     queryKey: ['eqp', 'detail', eqpId],
     queryFn: () => eqpApi.getEqpDetail(eqpId as string),
     enabled: Boolean(eqpId),
+    // 선택 시 항상 최신 데이터 (IP/포트/모델 변경 가능)
+    staleTime: 0,
   })
 }

@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { LoginPage } from '@/features/auth/components/LoginPage'
 import { EqpPage } from '@/features/eqp/components/EqpPage'
+import { ModelPage } from '@/features/model/components/ModelPage'
 
 export function Router() {
   return (
@@ -8,6 +9,7 @@ export function Router() {
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/eqp" element={<EqpPage />} />
+      <Route path="/model" element={<ModelPage />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   )
