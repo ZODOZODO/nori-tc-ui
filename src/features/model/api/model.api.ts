@@ -4,19 +4,28 @@ import {
   createModelFailResponse,
   DEFAULT_MODEL_ERROR_MESSAGE,
   ModelApiError,
+  type ModelBranchCreateRequest,
+  type ModelDeleteBatchResult,
+  type ModelDeleteBatchResponse,
   type ModelDeleteResponse,
   type ModelDetailResponse,
   type ModelDetailRowPayload,
   type ModelDetailNode,
+  type ModelInfoUpdateRequest,
   type ModelInfo,
   type ModelListResponse,
+  type ModelManagementResponse,
   type ModelMdfContentPayload,
   type ModelMdfContent,
   type ModelNodeDetailPayload,
   type ModelNodeDetailData,
   type ModelNodeDetailResponse,
+  type ModelParentCommitRequest,
+  type ModelParentCommitResponse,
+  type ModelParentCommitResult,
   type ModelPageResponse,
   type ModelDetailRow,
+  type ModelRootCreateRequest,
   type ModelUpsertRequest,
   isApiResponse,
 } from '../types/model.types'
@@ -327,6 +336,165 @@ export const modelApi = {
   },
 
   /**
+   * root model을 생성합니다.
+   */
+  createRootModel: async (request: ModelRootCreateRequest): Promise<ModelInfo> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.post<ModelManagementResponse>('/model/roots', request, {
+          withCredentials: true,
+          headers: {
+            [CSRF_HEADER_NAME]: csrfToken,
+          },
+          validateStatus: (status) => status >= 200 && status < 600,
+        }),
+      )
+
+      return resolveSuccessPayload<ModelInfo>(
+        response.data,
+        response.status,
+        'root 모델 생성에 실패했습니다.',
+      )
+    } catch (error) {
+      throw normalizeModelError(error, 'root 모델 생성에 실패했습니다.')
+    }
+  },
+
+  /**
+   * root model의 공통 정보를 수정합니다.
+   */
+  updateRootModelInfo: async (
+    modelKey: number,
+    request: ModelInfoUpdateRequest,
+  ): Promise<ModelInfo> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.put<ModelManagementResponse>(`/model/${modelKey}/info`, request, {
+          withCredentials: true,
+          headers: {
+            [CSRF_HEADER_NAME]: csrfToken,
+          },
+          validateStatus: (status) => status >= 200 && status < 600,
+        }),
+      )
+
+      return resolveSuccessPayload<ModelInfo>(
+        response.data,
+        response.status,
+        'root 모델 정보를 수정하지 못했습니다.',
+      )
+    } catch (error) {
+      throw normalizeModelError(error, 'root 모델 정보를 수정하지 못했습니다.')
+    }
+  },
+
+  /**
+   * root model에서 branch model을 생성합니다.
+   */
+  createBranchModel: async (
+    modelKey: number,
+    request: ModelBranchCreateRequest,
+  ): Promise<ModelInfo> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.post<ModelManagementResponse>(`/model/${modelKey}/branches`, request, {
+          withCredentials: true,
+          headers: {
+            [CSRF_HEADER_NAME]: csrfToken,
+          },
+          validateStatus: (status) => status >= 200 && status < 600,
+        }),
+      )
+
+      return resolveSuccessPayload<ModelInfo>(
+        response.data,
+        response.status,
+        'branch 모델 생성에 실패했습니다.',
+      )
+    } catch (error) {
+      throw normalizeModelError(error, 'branch 모델 생성에 실패했습니다.')
+    }
+  },
+
+  /**
+   * branch 최신 버전 기준 parent commit diff를 미리 조회합니다.
+   */
+  previewParentCommit: async (modelKey: number): Promise<ModelParentCommitResult> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.post<ModelParentCommitResponse>(`/model/${modelKey}/commit-parent`, null, {
+          withCredentials: true,
+          headers: {
+            [CSRF_HEADER_NAME]: csrfToken,
+          },
+          validateStatus: (status) => status >= 200 && status < 600,
+        }),
+      )
+
+      return resolveSuccessPayload<ModelParentCommitResult>(
+        response.data,
+        response.status,
+        'parent commit diff를 조회하지 못했습니다.',
+      )
+    } catch (error) {
+      throw normalizeModelError(error, 'parent commit diff를 조회하지 못했습니다.')
+    }
+  },
+
+  /**
+   * branch의 변경 내용을 parent 새 버전으로 commit합니다.
+   */
+  commitParentModel: async (
+    modelKey: number,
+    request: ModelParentCommitRequest,
+  ): Promise<ModelParentCommitResult> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.post<ModelParentCommitResponse>(`/model/${modelKey}/commit-parent`, request, {
+          withCredentials: true,
+          headers: {
+            [CSRF_HEADER_NAME]: csrfToken,
+          },
+          validateStatus: (status) => status >= 200 && status < 600,
+        }),
+      )
+
+      return resolveSuccessPayload<ModelParentCommitResult>(
+        response.data,
+        response.status,
+        'parent commit에 실패했습니다.',
+      )
+    } catch (error) {
+      throw normalizeModelError(error, 'parent commit에 실패했습니다.')
+    }
+  },
+
+  /**
+   * 특정 root model에 연결된 deprecated branch를 일괄 삭제합니다.
+   */
+  deleteDeprecatedBranches: async (modelKey: number): Promise<ModelDeleteBatchResult> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.delete<ModelDeleteBatchResponse>(`/model/${modelKey}/branches/deprecated`, {
+          withCredentials: true,
+          headers: {
+            [CSRF_HEADER_NAME]: csrfToken,
+          },
+          validateStatus: (status) => status >= 200 && status < 600,
+        }),
+      )
+
+      return resolveSuccessPayload<ModelDeleteBatchResult>(
+        response.data,
+        response.status,
+        'deprecated branch 삭제에 실패했습니다.',
+      )
+    } catch (error) {
+      throw normalizeModelError(error, 'deprecated branch 삭제에 실패했습니다.')
+    }
+  },
+
+  /**
    * 모델을 등록합니다.
    */
   createModel: async (request: ModelUpsertRequest): Promise<ModelInfo> => {
@@ -388,4 +556,33 @@ export const modelApi = {
       throw normalizeModelError(error, '모델 삭제에 실패했습니다.')
     }
   },
+
+  /**
+   * model_key 기준으로 root/branch model 전체를 삭제합니다.
+   */
+  deleteModelByKey: async (modelKey: number): Promise<void> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.delete<ModelDeleteResponse>(`/model/${modelKey}`, {
+          params: {
+            scope: 'model',
+          },
+          withCredentials: true,
+          headers: {
+            [CSRF_HEADER_NAME]: csrfToken,
+          },
+          validateStatus: (status) => status >= 200 && status < 600,
+        }),
+      )
+
+      resolveSuccessPayload<null>(response.data, response.status, '모델 삭제에 실패했습니다.', true)
+    } catch (error) {
+      throw normalizeModelError(error, '모델 삭제에 실패했습니다.')
+    }
+  },
+
+  /**
+   * branch model 삭제를 model 단위 삭제 API에 위임합니다.
+   */
+  deleteBranchModel: async (modelKey: number): Promise<void> => modelApi.deleteModelByKey(modelKey),
 }

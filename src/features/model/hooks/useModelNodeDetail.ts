@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { modelApi } from '../api/model.api'
+import { modelQueryKeys } from '../lib/model-query-keys'
 import type { ModelDetailNode } from '../types/model.types'
 
 /**
@@ -8,7 +9,7 @@ import type { ModelDetailNode } from '../types/model.types'
  */
 export function useModelNodeDetail(modelVersionKey: number | null, detailNode: ModelDetailNode | null) {
   return useQuery({
-    queryKey: ['model', 'detail-node', modelVersionKey, detailNode],
+    queryKey: modelQueryKeys.detailNode(modelVersionKey, detailNode),
     queryFn: () => modelApi.getModelNodeDetail(modelVersionKey as number, detailNode as ModelDetailNode),
     enabled: modelVersionKey !== null && detailNode !== null,
     staleTime: 0,

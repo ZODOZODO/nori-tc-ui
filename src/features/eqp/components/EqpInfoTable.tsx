@@ -91,7 +91,8 @@ export function EqpInfoTable({
   isLoading,
   isFetching,
 }: EqpInfoTableProps) {
-  const commInterfaceBadgeVariant = eqp?.commInterface === 'HSMS' ? 'info' : 'warning'
+  const commInterfaceBadgeVariant =
+    eqp?.commInterface.toUpperCase() === 'SOCKET' ? 'warning' : 'info'
 
   return (
     <section className="flex h-full min-h-0 flex-col rounded-2xl border border-[#E4EAE6] bg-white p-4">

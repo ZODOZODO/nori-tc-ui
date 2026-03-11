@@ -18,6 +18,7 @@ import { useEqpRuntimeState } from '../hooks/useEqpRuntimeState'
 import { useEqpCheckoutStatus } from '../hooks/useEqpCheckoutStatus'
 import { useEqpParams } from '../hooks/useEqpParams'
 import { useEqpParamMutations } from '../hooks/useEqpParamMutations'
+import { eqpQueryKeys, invalidateEqpSelectionQueries } from '../lib/eqp-query-keys'
 import { useEqpUiStore } from '../stores/eqp-ui.store'
 import { EqpApiError, type EqpInfo, type EqpParamRow } from '../types/eqp.types'
 import { groupEqpItems } from '../utils/eqp-group.util'
@@ -300,10 +301,7 @@ export function EqpPage() {
    */
   const handleSelectEqp = useCallback((eqpId: string) => {
     // 선택한 EQP의 관련 캐시 즉시 무효화 → 백그라운드 리페치 트리거
-    void queryClient.invalidateQueries({ queryKey: ['eqp', 'detail', eqpId] })
-    void queryClient.invalidateQueries({ queryKey: ['eqp', 'runtimeState', eqpId] })
-    void queryClient.invalidateQueries({ queryKey: ['eqp', 'paramVersions', eqpId] })
-    void queryClient.invalidateQueries({ queryKey: ['eqp', 'checkoutStatus', eqpId] })
+    void invalidateEqpSelectionQueries(queryClient, eqpId)
 
     selectEqp(eqpId)
     setAppliedVersion(EMPTY_VERSION_VALUE)
@@ -319,7 +317,7 @@ export function EqpPage() {
    */
   const handleSelectGatewayGroup = useCallback((groupIndex: number) => {
     // 그룹 선택 시 eqpList 캐시 무효화 → 최신 설비 목록 반영
-    void queryClient.invalidateQueries({ queryKey: ['eqp', 'list'] })
+    void queryClient.invalidateQueries({ queryKey: eqpQueryKeys.list() })
     selectGatewayGroup(groupIndex)
   }, [queryClient, selectGatewayGroup])
 

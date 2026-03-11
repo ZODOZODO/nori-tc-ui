@@ -41,11 +41,11 @@ const formatDateTime = (isoDateTime: string): string => {
 const resolveStatusBadgeVariant = (status: string): 'default' | 'info' | 'warning' | 'outline' => {
   const normalizedStatus = status.trim().toUpperCase()
 
-  if (normalizedStatus === 'ACTIVE') {
+  if (normalizedStatus === 'OPERATE') {
     return 'default'
   }
 
-  if (normalizedStatus === 'DRAFT') {
+  if (normalizedStatus === 'DEVELOP') {
     return 'info'
   }
 

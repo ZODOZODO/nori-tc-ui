@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { eqpApi } from '../api/eqp.api'
+import { invalidateEqpMutationQueries, removeEqpQueries } from '../lib/eqp-query-keys'
 import type { EqpCreateRequest, EqpLifecycleRequest, EqpUpdateRequest } from '../types/eqp.types'
 
 interface UpdateEqpVariables {
@@ -9,8 +10,6 @@ interface UpdateEqpVariables {
 
 interface DeleteEqpVariables {
   eqpId: string
-  interfaceType: string
-  uiMessage?: string | null
 }
 
 interface LifecycleVariables {
@@ -25,40 +24,40 @@ interface LifecycleVariables {
 export function useEqpMutations() {
   const queryClient = useQueryClient()
 
-  const invalidateEqpList = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['eqp', 'list'] })
-  }
-
   const createEqpMutation = useMutation({
     mutationFn: (request: EqpCreateRequest) => eqpApi.createEqp(request),
-    onSuccess: invalidateEqpList,
+    onSuccess: async (_, variables) => {
+      await invalidateEqpMutationQueries(queryClient, variables.eqpId)
+    },
   })
 
   const updateEqpMutation = useMutation({
     mutationFn: ({ eqpId, request }: UpdateEqpVariables) => eqpApi.updateEqp(eqpId, request),
     onSuccess: async (_, variables) => {
-      await invalidateEqpList()
-      await queryClient.invalidateQueries({ queryKey: ['eqp', 'detail', variables.eqpId] })
+      await invalidateEqpMutationQueries(queryClient, variables.eqpId)
     },
   })
 
   const deleteEqpMutation = useMutation({
-    mutationFn: ({ eqpId, interfaceType, uiMessage }: DeleteEqpVariables) =>
-      eqpApi.deleteEqp(eqpId, interfaceType, uiMessage),
+    mutationFn: ({ eqpId }: DeleteEqpVariables) => eqpApi.deleteEqp(eqpId),
     onSuccess: async (_, variables) => {
-      await invalidateEqpList()
-      await queryClient.removeQueries({ queryKey: ['eqp', 'detail', variables.eqpId] })
+      await invalidateEqpMutationQueries(queryClient)
+      removeEqpQueries(queryClient, variables.eqpId)
     },
   })
 
   const startEqpMutation = useMutation({
     mutationFn: ({ eqpId, request }: LifecycleVariables) => eqpApi.startEqp(eqpId, request),
-    onSuccess: invalidateEqpList,
+    onSuccess: async () => {
+      await invalidateEqpMutationQueries(queryClient)
+    },
   })
 
   const endEqpMutation = useMutation({
     mutationFn: ({ eqpId, request }: LifecycleVariables) => eqpApi.endEqp(eqpId, request),
-    onSuccess: invalidateEqpList,
+    onSuccess: async () => {
+      await invalidateEqpMutationQueries(queryClient)
+    },
   })
 
   return {

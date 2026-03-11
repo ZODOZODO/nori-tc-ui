@@ -16,6 +16,10 @@ import {
   type EqpInfo,
   type EqpInfoDetailResponse,
   type EqpInfoListResponse,
+  type EqpManageDetail,
+  type EqpManageDetailResponse,
+  type EqpManageOptions,
+  type EqpManageOptionsResponse,
   type EqpModelInfo,
   type EqpModelInfoResponse,
   type EqpInfoPage,
@@ -239,6 +243,47 @@ export const eqpApi = {
       )
     } catch (error) {
       throw normalizeEqpError(error, '설비 상세 정보를 조회하지 못했습니다.')
+    }
+  },
+
+  /**
+   * EQP 관리 상세를 조회합니다.
+   */
+  getEqpManageDetail: async (eqpId: string): Promise<EqpManageDetail> => {
+    try {
+      const response = await apiClient.get<EqpManageDetailResponse>(
+        `/eqp/${encodeURIComponent(eqpId)}/manage`,
+        {
+          withCredentials: true,
+        },
+      )
+
+      return resolveSuccessPayload<EqpManageDetail>(
+        response.data,
+        response.status,
+        '설비 관리 상세 정보를 조회하지 못했습니다.',
+      )
+    } catch (error) {
+      throw normalizeEqpError(error, '설비 관리 상세 정보를 조회하지 못했습니다.')
+    }
+  },
+
+  /**
+   * EQP 관리 화면 옵션을 조회합니다.
+   */
+  getEqpManageOptions: async (): Promise<EqpManageOptions> => {
+    try {
+      const response = await apiClient.get<EqpManageOptionsResponse>('/eqp/options', {
+        withCredentials: true,
+      })
+
+      return resolveSuccessPayload<EqpManageOptions>(
+        response.data,
+        response.status,
+        '설비 관리 옵션을 조회하지 못했습니다.',
+      )
+    } catch (error) {
+      throw normalizeEqpError(error, '설비 관리 옵션을 조회하지 못했습니다.')
     }
   },
 
@@ -474,14 +519,10 @@ export const eqpApi = {
   /**
    * 설비를 삭제합니다.
    */
-  deleteEqp: async (eqpId: string, interfaceType: string, uiMessage?: string | null): Promise<void> => {
+  deleteEqp: async (eqpId: string): Promise<void> => {
     try {
       const response = await withCsrfHeaders((csrfToken) =>
         apiClient.delete<EqpDualCommandResponse>(`/eqp/${encodeURIComponent(eqpId)}`, {
-          params: {
-            interfaceType,
-            ...(uiMessage ? { uiMessage } : {}),
-          },
           withCredentials: true,
           headers: {
             [CSRF_HEADER_NAME]: csrfToken,

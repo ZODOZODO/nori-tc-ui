@@ -22,6 +22,10 @@ interface ModelUiState {
   setEditMode: (enabled: boolean) => void
   setCheckInModalOpen: (open: boolean) => void
   setProfileModalOpen: (open: boolean) => void
+  handleBranchCommitSuccess: (
+    branchModelKey: number,
+    committedParentModelVersionKey: number | null,
+  ) => void
   reset: () => void
 }
 
@@ -134,6 +138,37 @@ export const useModelUiStore = create<ModelUiState>((set) => ({
   setEditMode: (enabled) => set({ isEditMode: enabled }),
   setCheckInModalOpen: (open) => set({ isCheckInModalOpen: open }),
   setProfileModalOpen: (open) => set({ isProfileModalOpen: open }),
+  handleBranchCommitSuccess: (branchModelKey, committedParentModelVersionKey) =>
+    set((state) => {
+      const nextTabs = state.openedTabs.filter((tab) => tab.modelKey !== branchModelKey)
+      const nextDetailNodeByTab = Object.fromEntries(
+        Object.entries(state.detailNodeByTab).filter(([modelVersionKey]) =>
+          nextTabs.some((tab) => tab.modelVersionKey === Number(modelVersionKey)),
+        ),
+      )
+
+      const hasActiveTab =
+        state.activeTab !== null &&
+        nextTabs.some((tab) => tab.modelVersionKey === state.activeTab)
+      const nextActiveTab = hasActiveTab ? state.activeTab : null
+
+      const nextSelectedModelVersionKey =
+        committedParentModelVersionKey ??
+        (state.selectedModelVersionKey !== null &&
+        nextTabs.some((tab) => tab.modelVersionKey === state.selectedModelVersionKey)
+          ? state.selectedModelVersionKey
+          : nextActiveTab)
+
+      return {
+        openedTabs: nextTabs,
+        activeTab: nextActiveTab,
+        selectedModelVersionKey: nextSelectedModelVersionKey ?? null,
+        detailNode: nextActiveTab !== null ? (nextDetailNodeByTab[nextActiveTab] ?? null) : null,
+        detailNodeByTab: nextDetailNodeByTab,
+        isEditMode: false,
+        isCheckInModalOpen: false,
+      }
+    }),
   reset: () =>
     set({
       selectedModelVersionKey: null,

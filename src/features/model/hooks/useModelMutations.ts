@@ -1,6 +1,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { modelApi } from '../api/model.api'
 import {
+  invalidateModelTreeQueries,
+  invalidateModelVersionQueries,
+  modelQueryKeys,
+  removeModelVersionQueries,
+} from '../lib/model-query-keys'
+import {
   createModelFailResponse,
   ModelApiError,
   type ModelInfo,
@@ -95,16 +101,8 @@ const createCheckoutConflictError = (owner: string | null): ModelApiError =>
 export function useModelMutations() {
   const queryClient = useQueryClient()
 
-  const invalidateModelList = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['model', 'list'] })
-  }
-
-  const invalidateModelDetail = async (modelVersionKey: number) => {
-    await queryClient.invalidateQueries({ queryKey: ['model', 'detail', modelVersionKey] })
-  }
-
   const getModelItems = async (): Promise<ModelInfo[]> => {
-    const cachedPage = queryClient.getQueryData<ModelPageResponse>(['model', 'list'])
+    const cachedPage = queryClient.getQueryData<ModelPageResponse>(modelQueryKeys.list())
     if (cachedPage && Array.isArray(cachedPage.items)) {
       return cachedPage.items
     }
@@ -116,8 +114,8 @@ export function useModelMutations() {
   const createModelMutation = useMutation({
     mutationFn: (request: ModelUpsertRequest) => modelApi.createModel(request),
     onSuccess: async (createdModel) => {
-      await invalidateModelList()
-      await invalidateModelDetail(createdModel.modelVersionKey)
+      await invalidateModelTreeQueries(queryClient)
+      await invalidateModelVersionQueries(queryClient, createdModel.modelVersionKey)
     },
   })
 
@@ -125,16 +123,16 @@ export function useModelMutations() {
     mutationFn: ({ modelVersionKey, request }: UpdateModelVariables) =>
       modelApi.updateModel(modelVersionKey, request),
     onSuccess: async (_, variables) => {
-      await invalidateModelList()
-      await invalidateModelDetail(variables.modelVersionKey)
+      await invalidateModelTreeQueries(queryClient)
+      await invalidateModelVersionQueries(queryClient, variables.modelVersionKey)
     },
   })
 
   const deleteModelMutation = useMutation({
     mutationFn: ({ modelVersionKey }: DeleteModelVariables) => modelApi.deleteModel(modelVersionKey),
     onSuccess: async (_, variables) => {
-      await invalidateModelList()
-      queryClient.removeQueries({ queryKey: ['model', 'detail', variables.modelVersionKey] })
+      await invalidateModelTreeQueries(queryClient)
+      removeModelVersionQueries(queryClient, variables.modelVersionKey)
     },
   })
 
@@ -170,9 +168,9 @@ export function useModelMutations() {
       })
     },
     onSuccess: async (checkedOutModel, variables) => {
-      await invalidateModelList()
-      await invalidateModelDetail(variables.model.modelVersionKey)
-      await invalidateModelDetail(checkedOutModel.modelVersionKey)
+      await invalidateModelTreeQueries(queryClient)
+      await invalidateModelVersionQueries(queryClient, variables.model.modelVersionKey)
+      await invalidateModelVersionQueries(queryClient, checkedOutModel.modelVersionKey)
     },
   })
 
@@ -221,9 +219,9 @@ export function useModelMutations() {
       return createdModel
     },
     onSuccess: async (createdModel, variables) => {
-      await invalidateModelList()
-      await invalidateModelDetail(createdModel.modelVersionKey)
-      queryClient.removeQueries({ queryKey: ['model', 'detail', variables.editModel.modelVersionKey] })
+      await invalidateModelTreeQueries(queryClient)
+      await invalidateModelVersionQueries(queryClient, createdModel.modelVersionKey)
+      removeModelVersionQueries(queryClient, variables.editModel.modelVersionKey)
     },
   })
 

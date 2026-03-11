@@ -51,7 +51,7 @@ export function GatewayGroupTable({ eqpItems, groupName }: GatewayGroupTableProp
                 <TableRow key={eqp.eqpId}>
                   <TableCell>{eqp.eqpId}</TableCell>
                   <TableCell>
-                    <Badge variant={eqp.commInterface === 'HSMS' ? 'info' : 'warning'}>
+                    <Badge variant={eqp.commInterface.toUpperCase() === 'SOCKET' ? 'warning' : 'info'}>
                       {eqp.commInterface}
                     </Badge>
                   </TableCell>

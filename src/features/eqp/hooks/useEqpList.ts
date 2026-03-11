@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { eqpApi } from '../api/eqp.api'
+import { eqpQueryKeys } from '../lib/eqp-query-keys'
 
 /**
  * EQP 목록 조회 훅입니다.
@@ -7,7 +8,7 @@ import { eqpApi } from '../api/eqp.api'
  */
 export function useEqpList() {
   return useQuery({
-    queryKey: ['eqp', 'list'],
+    queryKey: eqpQueryKeys.list(),
     queryFn: () => eqpApi.getEqpList(0, 500),
     // 다른 사용자의 EQP 추가/수정 반영을 위해 60초로 단축 (기존 5분)
     staleTime: 60_000,

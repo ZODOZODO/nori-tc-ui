@@ -1,21 +1,12 @@
 import type { ApiResponse as BaseApiResponse } from '@/features/auth/types/auth.types'
+import type { ModelStatus, ProtocolType } from '@/shared/types/domain.types'
+
+export type { ModelStatus, ProtocolType } from '@/shared/types/domain.types'
 
 /**
  * Model 도메인에서도 auth와 동일한 ApiResponse 래퍼 계약을 사용합니다.
  */
 export type ApiResponse<TData> = BaseApiResponse<TData>
-
-/**
- * 모델 통신 인터페이스 타입입니다.
- * 백엔드 enum 확장 가능성을 고려해 문자열 fallback을 허용합니다.
- */
-export type ProtocolType = 'HSMS' | 'SOCKET' | (string & {})
-
-/**
- * 모델 상태 타입입니다.
- * 현재 백엔드 계약은 DRAFT/ACTIVE/DEPRECATED를 사용합니다.
- */
-export type ModelStatus = 'DRAFT' | 'ACTIVE' | 'DEPRECATED' | (string & {})
 
 /**
  * GET /api/model, GET /api/model/{modelVersionKey} 공통 단건 모델입니다.
@@ -24,6 +15,7 @@ export interface ModelInfo {
   modelVersionKey: number
   modelKey: number
   modelName: string
+  parentModel: string | null
   modelVersion: string
   commInterface: ProtocolType
   status: ModelStatus
@@ -60,6 +52,37 @@ export interface ModelUpsertRequest {
 }
 
 /**
+ * root model 생성 요청 DTO입니다.
+ */
+export interface ModelRootCreateRequest {
+  modelName: string
+  commInterface: ProtocolType
+  maker?: string | null
+}
+
+/**
+ * root model 공통 정보 수정 요청 DTO입니다.
+ */
+export interface ModelInfoUpdateRequest {
+  maker?: string | null
+}
+
+/**
+ * branch model 생성 요청 DTO입니다.
+ */
+export interface ModelBranchCreateRequest {
+  suffix: string
+}
+
+/**
+ * parent commit preview/실행 요청 DTO입니다.
+ */
+export interface ModelParentCommitRequest {
+  applyCommit?: boolean | null
+  newParentVersion?: string | null
+}
+
+/**
  * 모델 목록 조회 응답 타입입니다.
  */
 export type ModelListResponse = ApiResponse<ModelPageResponse>
@@ -73,6 +96,20 @@ export type ModelDetailResponse = ApiResponse<ModelInfo>
  * 모델 삭제 응답 타입입니다.
  */
 export type ModelDeleteResponse = ApiResponse<null>
+
+/**
+ * deprecated branch 일괄 삭제 결과 payload 입니다.
+ */
+export interface ModelDeleteBatchResult {
+  deletedCount: number
+  deletedModelKeys: number[]
+  deletedModelNames: string[]
+}
+
+/**
+ * deprecated branch 일괄 삭제 응답 타입입니다.
+ */
+export type ModelDeleteBatchResponse = ApiResponse<ModelDeleteBatchResult>
 
 /**
  * 모델 상세 노드 row 원본 payload 타입입니다.
@@ -153,6 +190,52 @@ export interface ModelNodeDetailData {
   rows: ModelDetailRow[]
   mdfContents: ModelMdfContent[]
 }
+
+/**
+ * parent commit diff 항목 응답 모델입니다.
+ */
+export interface ModelDiffItem {
+  identity: string
+  branchValues: string[]
+  parentValues: string[]
+}
+
+/**
+ * parent commit diff 섹션 응답 모델입니다.
+ */
+export interface ModelDiffSection {
+  detailNode: ModelDetailNode | (string & {})
+  columns: string[]
+  added: ModelDiffItem[]
+  changed: ModelDiffItem[]
+  deleted: ModelDiffItem[]
+}
+
+/**
+ * parent commit preview/실행 결과 payload 입니다.
+ */
+export interface ModelParentCommitResult {
+  committed: boolean
+  branchModelKey: number
+  parentModelKey: number
+  branchModelName: string
+  parentModelName: string
+  branchLatestVersion: string
+  parentLatestVersion: string
+  newParentVersion: string | null
+  committedParentModelVersionKey: number | null
+  sections: ModelDiffSection[]
+}
+
+/**
+ * root/branch 생성 및 root 정보 수정 응답 타입입니다.
+ */
+export type ModelManagementResponse = ApiResponse<ModelInfo>
+
+/**
+ * parent commit preview/실행 응답 타입입니다.
+ */
+export type ModelParentCommitResponse = ApiResponse<ModelParentCommitResult>
 
 /**
  * SECS 계열 상세 노드 순서입니다.

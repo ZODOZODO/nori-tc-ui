@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { eqpApi } from '../api/eqp.api'
+import { eqpQueryKeys } from '../lib/eqp-query-keys'
 import type { EqpCheckoutRequest, EqpCheckinRequest, EqpParamSaveItem } from '../types/eqp.types'
 
 interface CheckoutVariables {
@@ -31,8 +32,8 @@ export function useEqpParamMutations() {
     mutationFn: ({ eqpId, request }: CheckoutVariables) => eqpApi.checkoutEqp(eqpId, request),
     onSuccess: async (_, variables) => {
       // 체크아웃 상태와 EDIT 파라미터 캐시를 무효화해 최신 상태를 반영한다.
-      await queryClient.invalidateQueries({ queryKey: ['eqp', 'checkoutStatus', variables.eqpId] })
-      await queryClient.invalidateQueries({ queryKey: ['eqp', 'params', variables.eqpId, 'EDIT'] })
+      await queryClient.invalidateQueries({ queryKey: eqpQueryKeys.checkoutStatus(variables.eqpId) })
+      await queryClient.invalidateQueries({ queryKey: eqpQueryKeys.params(variables.eqpId, 'EDIT') })
     },
   })
 
@@ -40,7 +41,7 @@ export function useEqpParamMutations() {
     mutationFn: ({ eqpId, params }: SaveEditParamsVariables) => eqpApi.saveEqpEditParams(eqpId, params),
     onSuccess: async (_, variables) => {
       // 저장 후 EDIT 파라미터 캐시를 무효화해 최신 편집값을 반영한다.
-      await queryClient.invalidateQueries({ queryKey: ['eqp', 'params', variables.eqpId, 'EDIT'] })
+      await queryClient.invalidateQueries({ queryKey: eqpQueryKeys.params(variables.eqpId, 'EDIT') })
     },
   })
 
@@ -48,9 +49,9 @@ export function useEqpParamMutations() {
     mutationFn: ({ eqpId, request }: CheckinVariables) => eqpApi.checkinEqp(eqpId, request),
     onSuccess: async (_, variables) => {
       // 체크인 후 버전 목록, 체크아웃 상태, 모든 파라미터 캐시를 무효화한다.
-      await queryClient.invalidateQueries({ queryKey: ['eqp', 'paramVersions', variables.eqpId] })
-      await queryClient.invalidateQueries({ queryKey: ['eqp', 'checkoutStatus', variables.eqpId] })
-      await queryClient.invalidateQueries({ queryKey: ['eqp', 'params', variables.eqpId] })
+      await queryClient.invalidateQueries({ queryKey: eqpQueryKeys.paramVersions(variables.eqpId) })
+      await queryClient.invalidateQueries({ queryKey: eqpQueryKeys.checkoutStatus(variables.eqpId) })
+      await queryClient.invalidateQueries({ queryKey: eqpQueryKeys.paramsRoot(variables.eqpId) })
     },
   })
 
