@@ -84,14 +84,33 @@ export function ModelDetailPanel({
   const normalizedDetailNode = detailNode ?? detailNodes[0] ?? null
   const normalizedDetailColumns = detailColumns.length > 0 ? detailColumns : ['Value']
   const isMdfNode = normalizedDetailNode === 'mdf'
+  const isBranchModel = Boolean(activeModel?.parentModel?.trim())
+  const isDeprecatedBranch =
+    isBranchModel && activeModel?.status.trim().toUpperCase() === 'DEPRECATED'
   const isReadOnly = !isEditMode || isLockedByOtherUser
 
-  const hintText = isReadOnly
-    ? 'Read-only (Check Out): table locked'
-    : 'Editable (Check In): table unlocked'
+  const hintText = !activeModel
+    ? '모델을 선택해 주세요.'
+    : !isBranchModel
+      ? 'Root model은 항상 읽기 전용입니다.'
+      : isDeprecatedBranch
+        ? 'DEPRECATED branch는 읽기 전용입니다.'
+        : isReadOnly
+          ? 'Read-only (Check Out): explicit checkout required'
+          : 'Editable (Check In): table unlocked'
 
-  const checkoutDisabled = !activeModel || isCheckoutPending || isLockedByOtherUser
-  const checkinDisabled = !activeModel || isCheckinPending || !isEditMode || isLockedByOtherUser
+  const checkoutDisabled =
+    !activeModel ||
+    !isBranchModel ||
+    isDeprecatedBranch ||
+    isCheckoutPending ||
+    isLockedByOtherUser
+  const checkinDisabled =
+    !activeModel ||
+    !isBranchModel ||
+    isCheckinPending ||
+    !isEditMode ||
+    isLockedByOtherUser
 
   return (
     <section
@@ -143,7 +162,7 @@ export function ModelDetailPanel({
           )}
         </div>
 
-        {isEditMode ? (
+        {isBranchModel && isEditMode ? (
           <Button
             type="button"
             variant="outline"
@@ -154,7 +173,7 @@ export function ModelDetailPanel({
             {isCheckinPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null}
             Check In
           </Button>
-        ) : (
+        ) : isBranchModel ? (
           <Button
             type="button"
             variant="outline"
@@ -165,14 +184,14 @@ export function ModelDetailPanel({
             {isCheckoutPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null}
             Check Out
           </Button>
-        )}
+        ) : null}
       </div>
 
       <div className="mb-3 text-xs">
         <span className={cn(isReadOnly ? 'text-[#8A8A8A]' : 'font-medium text-[#7C9082]')}>{hintText}</span>
       </div>
 
-      {isLockedByOtherUser ? (
+      {isBranchModel && isLockedByOtherUser ? (
         <p className="mb-3 text-xs text-[#C5534B]">
           {lockOwner
             ? `${lockOwner}님이 EDIT 모델을 점유하고 있어 수정할 수 없습니다.`

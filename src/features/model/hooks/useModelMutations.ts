@@ -101,15 +101,14 @@ const createCheckoutConflictError = (owner: string | null): ModelApiError =>
 export function useModelMutations() {
   const queryClient = useQueryClient()
 
-  const getModelItems = async (): Promise<ModelInfo[]> => {
-    const cachedPage = queryClient.getQueryData<ModelPageResponse>(modelQueryKeys.list())
-    if (cachedPage && Array.isArray(cachedPage.items)) {
-      return cachedPage.items
-    }
-
+  const refreshModelItems = async (): Promise<ModelInfo[]> => {
     const remotePage = await modelApi.getModelList(0, 500)
+    queryClient.setQueryData<ModelPageResponse>(modelQueryKeys.list(), remotePage)
     return remotePage.items
   }
+
+  const findEditModel = (modelItems: ModelInfo[], modelKey: number): ModelInfo | null =>
+    modelItems.find((item) => item.modelKey === modelKey && isEditVersion(item.modelVersion)) ?? null
 
   const createModelMutation = useMutation({
     mutationFn: (request: ModelUpsertRequest) => modelApi.createModel(request),
@@ -138,10 +137,8 @@ export function useModelMutations() {
 
   const checkoutModelMutation = useMutation({
     mutationFn: async ({ model, currentUserId }: CheckoutModelVariables) => {
-      const modelItems = await getModelItems()
-      const existingEditModel = modelItems.find(
-        (item) => item.modelKey === model.modelKey && isEditVersion(item.modelVersion),
-      )
+      const modelItems = await refreshModelItems()
+      const existingEditModel = findEditModel(modelItems, model.modelKey)
 
       if (existingEditModel) {
         const lockOwner = resolveLockOwner(existingEditModel)
@@ -156,16 +153,34 @@ export function useModelMutations() {
 
       const auditUser = resolveAuditUser(currentUserId, model.updatedBy)
 
-      return modelApi.createModel({
-        modelName: model.modelName,
-        modelVersion: EDIT_MODEL_VERSION,
-        commInterface: model.commInterface,
-        status: model.status,
-        description: model.description,
-        maker: model.maker,
-        createdBy: auditUser,
-        updatedBy: auditUser,
-      })
+      try {
+        return await modelApi.createModel({
+          modelName: model.modelName,
+          modelVersion: EDIT_MODEL_VERSION,
+          commInterface: model.commInterface,
+          status: model.status,
+          description: model.description,
+          maker: model.maker,
+          createdBy: auditUser,
+          updatedBy: auditUser,
+        })
+      } catch (error) {
+        if (error instanceof ModelApiError && error.status === 409) {
+          const latestModelItems = await refreshModelItems()
+          const conflictingEditModel = findEditModel(latestModelItems, model.modelKey)
+
+          if (conflictingEditModel) {
+            const lockOwner = resolveLockOwner(conflictingEditModel)
+            if (lockOwner && currentUserId && lockOwner === currentUserId) {
+              return conflictingEditModel
+            }
+
+            throw createCheckoutConflictError(lockOwner)
+          }
+        }
+
+        throw error
+      }
     },
     onSuccess: async (checkedOutModel, variables) => {
       await invalidateModelTreeQueries(queryClient)

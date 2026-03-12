@@ -220,6 +220,7 @@ export function ModelPage() {
     targetModel: null,
   })
   const [deleteDialogErrorMessage, setDeleteDialogErrorMessage] = useState<string | null>(null)
+  const [explicitCheckoutModelVersionKey, setExplicitCheckoutModelVersionKey] = useState<number | null>(null)
 
   // 가운데 컨테이너 높이 계산용 ref
   const centerContainerRef = useRef<HTMLDivElement>(null)
@@ -397,13 +398,45 @@ export function ModelPage() {
     }
 
     const isEditModel = activeTabModel.modelVersion.trim().toUpperCase() === 'EDIT'
+    const isBranchModel = Boolean(activeTabModel.parentModel?.trim())
     const canEdit =
-      isEditModel && (!lockOwner || (currentUserId !== null && lockOwner === currentUserId))
+      isBranchModel &&
+      isEditModel &&
+      explicitCheckoutModelVersionKey === activeTabModel.modelVersionKey &&
+      (!lockOwner || (currentUserId !== null && lockOwner === currentUserId))
 
     if (isEditMode !== canEdit) {
       setEditMode(canEdit)
     }
-  }, [activeTabModel, currentUserId, isEditMode, lockOwner, setEditMode])
+  }, [
+    activeTabModel,
+    currentUserId,
+    explicitCheckoutModelVersionKey,
+    isEditMode,
+    lockOwner,
+    setEditMode,
+  ])
+
+  /**
+   * 체크아웃 상태로 기억한 EDIT 버전이 사라졌으면 편집 세션도 함께 정리합니다.
+   */
+  useEffect(() => {
+    if (explicitCheckoutModelVersionKey === null) {
+      return
+    }
+
+    const checkedOutModel = modelItems.find(
+      (item) => item.modelVersionKey === explicitCheckoutModelVersionKey,
+    )
+
+    if (
+      !checkedOutModel ||
+      !checkedOutModel.parentModel?.trim() ||
+      checkedOutModel.modelVersion.trim().toUpperCase() !== 'EDIT'
+    ) {
+      setExplicitCheckoutModelVersionKey(null)
+    }
+  }, [explicitCheckoutModelVersionKey, modelItems])
 
   /**
    * ResizableDivider 드래그 처리.
@@ -504,6 +537,15 @@ export function ModelPage() {
     setActiveTab(modelVersionKey)
     setSelectedModelVersionKey(modelVersionKey)
     setCheckInErrorMessage(null)
+  }
+
+  const handleCloseTab = (modelVersionKey: number) => {
+    closeModelTab(modelVersionKey)
+    if (explicitCheckoutModelVersionKey === modelVersionKey) {
+      setExplicitCheckoutModelVersionKey(null)
+      setCheckInModalOpen(false)
+      setCheckInErrorMessage(null)
+    }
   }
 
   /**
@@ -668,6 +710,7 @@ export function ModelPage() {
 
       parentCommitPreviewModelKeyRef.current = null
       setParentCommitPreviewResult(null)
+      setExplicitCheckoutModelVersionKey(null)
       setIsParentCommitModalOpen(false)
     } catch (error) {
       setParentCommitErrorMessage(resolveErrorMessage(error, 'parent commit에 실패했습니다.'))
@@ -705,29 +748,37 @@ export function ModelPage() {
 
     try {
       setDeleteDialogErrorMessage(null)
+      let removedVersionKeys: number[] = []
+      let fallbackSelectedModelVersionKey: number | null = null
 
       if (deleteDialogState.mode === 'deprecated-branches') {
         const deleteResult = await deleteDeprecatedBranchesMutation.mutateAsync(targetModel.modelKey)
-        handleModelVersionsRemoved(
-          collectModelVersionKeysByModelKeys(modelItems, deleteResult.deletedModelKeys),
-          resolveLatestModelByName(modelItems, targetModel.modelName)?.modelVersionKey ?? null,
+        removedVersionKeys = collectModelVersionKeysByModelKeys(
+          modelItems,
+          deleteResult.deletedModelKeys,
         )
+        fallbackSelectedModelVersionKey =
+          resolveLatestModelByName(modelItems, targetModel.modelName)?.modelVersionKey ?? null
       } else if (deleteDialogState.mode === 'branch') {
         await deleteModelByKeyMutation.mutateAsync({
           modelKey: targetModel.modelKey,
         })
-        handleModelVersionsRemoved(
-          collectModelVersionKeysByModelKeys(modelItems, [targetModel.modelKey]),
-          resolveLatestModelByName(modelItems, targetModel.parentModel)?.modelVersionKey ?? null,
-        )
+        removedVersionKeys = collectModelVersionKeysByModelKeys(modelItems, [targetModel.modelKey])
+        fallbackSelectedModelVersionKey =
+          resolveLatestModelByName(modelItems, targetModel.parentModel)?.modelVersionKey ?? null
       } else {
         await deleteModelByKeyMutation.mutateAsync({
           modelKey: targetModel.modelKey,
         })
-        handleModelVersionsRemoved(
-          collectCascadeDeletedVersionKeys(modelItems, targetModel.modelName),
-          null,
-        )
+        removedVersionKeys = collectCascadeDeletedVersionKeys(modelItems, targetModel.modelName)
+      }
+
+      handleModelVersionsRemoved(removedVersionKeys, fallbackSelectedModelVersionKey)
+      if (
+        explicitCheckoutModelVersionKey !== null &&
+        removedVersionKeys.includes(explicitCheckoutModelVersionKey)
+      ) {
+        setExplicitCheckoutModelVersionKey(null)
       }
 
       setDeleteDialogState((previousState) => ({
@@ -795,6 +846,16 @@ export function ModelPage() {
       return
     }
 
+    if (!activeTabModel.parentModel?.trim()) {
+      setCheckInErrorMessage('root model은 checkout 없이 읽기 전용으로만 조회할 수 있습니다.')
+      return
+    }
+
+    if (isDeprecatedStatus(activeTabModel.status)) {
+      setCheckInErrorMessage('DEPRECATED branch model은 편집할 수 없습니다.')
+      return
+    }
+
     try {
       setCheckInErrorMessage(null)
       const checkedOutModel = await checkoutModelMutation.mutateAsync({
@@ -811,6 +872,7 @@ export function ModelPage() {
         setDetailNodeForTab(checkedOutModel.modelVersionKey, detailNodes[0])
       }
 
+      setExplicitCheckoutModelVersionKey(checkedOutModel.modelVersionKey)
       setEditMode(true)
     } catch (error) {
       setCheckInErrorMessage(resolveErrorMessage(error, '체크아웃에 실패했습니다.'))
@@ -861,6 +923,7 @@ export function ModelPage() {
       }
 
       setEditMode(false)
+      setExplicitCheckoutModelVersionKey(null)
       setCheckInModalOpen(false)
     } catch (error) {
       setCheckInErrorMessage(resolveErrorMessage(error, '편집 상태 원복에 실패했습니다.'))
@@ -893,6 +956,7 @@ export function ModelPage() {
       }
 
       setEditMode(false)
+      setExplicitCheckoutModelVersionKey(null)
       setCheckInModalOpen(false)
     } catch (error) {
       setCheckInErrorMessage(resolveErrorMessage(error, '체크인 중 오류가 발생했습니다.'))
@@ -916,6 +980,7 @@ export function ModelPage() {
     } finally {
       resetUiState()
       setCheckInErrorMessage(null)
+      setExplicitCheckoutModelVersionKey(null)
       setTopPanelHeightPercent(PANEL_INITIAL_TOP_PERCENT)
       setDetailColumnsByContext({})
       setDetailRowsByContext({})
@@ -1091,7 +1156,7 @@ export function ModelPage() {
                     isCheckinPending={checkinModelMutation.isPending}
                     actionErrorMessage={checkInErrorMessage}
                     onSelectTab={handleSelectTab}
-                    onCloseTab={closeModelTab}
+                    onCloseTab={handleCloseTab}
                     onSelectDetailNode={setDetailNode}
                     onChangeDetailValue={handleDetailValueChange}
                     onCheckOut={() => void handleCheckOut()}

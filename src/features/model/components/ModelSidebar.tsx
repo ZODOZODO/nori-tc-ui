@@ -1,6 +1,5 @@
 import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { Badge } from '@/components/ui/badge'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -55,34 +54,6 @@ interface SectionProps {
 }
 
 /**
- * Sidebar 노드에 표시할 관리 상태 배지를 계산합니다.
- */
-const resolveNodeBadges = (
-  node: ModelTreeNode,
-): Array<{ label: string; variant: 'default' | 'secondary' | 'info' | 'outline' | 'warning' }> => {
-  const normalizedStatus = node.latestStatus.trim().toUpperCase()
-  const isRootModel = !node.representative.parentModel
-  const badges: Array<{
-    label: string
-    variant: 'default' | 'secondary' | 'info' | 'outline' | 'warning'
-  }> = [
-    {
-      label: isRootModel ? 'ROOT' : 'BRANCH',
-      variant: isRootModel ? 'secondary' : 'info',
-    },
-  ]
-
-  if (normalizedStatus === 'DEPRECATED') {
-    badges.push({
-      label: 'DEPRECATED',
-      variant: 'warning',
-    })
-  }
-
-  return badges
-}
-
-/**
  * Sidebar의 단일 root/branch 노드를 렌더링합니다.
  */
 function TreeNode({
@@ -106,7 +77,7 @@ function TreeNode({
 }) {
   const isSelected = selectedModelName === node.representative.modelName
   const isRootModel = !node.representative.parentModel
-  const badges = resolveNodeBadges(node)
+  const isDeprecatedNode = node.latestStatus.trim().toUpperCase() === 'DEPRECATED'
 
   const triggerButton = (
     <button
@@ -126,18 +97,15 @@ function TreeNode({
         )}
       />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-semibold">{node.representative.modelName}</span>
-        <span className="mt-0.5 block truncate text-[10px] text-[#7A8780]">
-          최신 버전: {node.representative.modelVersion}
+        <span className="block truncate text-xs font-semibold">
+          {node.representative.modelName}
         </span>
       </span>
-      <span className="flex shrink-0 flex-wrap justify-end gap-1">
-        {badges.map((badge) => (
-          <Badge key={`${node.representative.modelName}-${badge.label}`} variant={badge.variant} className="px-2 py-0 text-[10px]">
-            {badge.label}
-          </Badge>
-        ))}
-      </span>
+      {isDeprecatedNode ? (
+        <span className="shrink-0 rounded-full border border-[#EFC7B4] bg-[#FFF5EF] px-2 py-0.5 text-[10px] font-semibold text-[#A05A39]">
+          DEPRECATED
+        </span>
+      ) : null}
     </button>
   )
 
@@ -354,7 +322,7 @@ export function ModelSidebar({
           <Input
             value={searchKeyword}
             onChange={(event) => setSearchKeyword(event.target.value)}
-            placeholder="Model 검색"
+            placeholder="Model Name 검색"
             className="h-9 bg-[#F7FAF8] pl-8 text-xs"
           />
         </div>

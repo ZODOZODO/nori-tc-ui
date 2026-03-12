@@ -40,17 +40,15 @@ const resolveInterfaceGroup = (commInterface: ProtocolType): InterfaceGroup => {
 }
 
 /**
- * 검색어가 모델명 또는 최신 버전 문자열에 포함되는지 확인합니다.
+ * 검색어가 모델명에 포함되는지 확인합니다.
+ * 후속 정책상 Sidebar 검색은 버전이 아니라 모델 식별 자체에 집중합니다.
  */
 const matchesKeyword = (model: ModelInfo, normalizedKeyword: string): boolean => {
   if (!normalizedKeyword) {
     return true
   }
 
-  return (
-    model.modelName.toLowerCase().includes(normalizedKeyword) ||
-    model.modelVersion.toLowerCase().includes(normalizedKeyword)
-  )
+  return model.modelName.toLowerCase().includes(normalizedKeyword)
 }
 
 /**

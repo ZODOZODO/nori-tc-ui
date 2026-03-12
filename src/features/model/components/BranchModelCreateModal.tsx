@@ -12,6 +12,8 @@ import {
 import { Input } from '@/components/ui/input'
 import type { ModelInfo } from '../types/model.types'
 
+const MAX_MODEL_NAME_LENGTH = 1000
+
 interface BranchModelCreateModalProps {
   open: boolean
   parentModel: ModelInfo | null
@@ -37,23 +39,46 @@ export function BranchModelCreateModal({
 }: BranchModelCreateModalProps) {
   const [suffix, setSuffix] = useState('')
   const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null)
+  const normalizedParentModelName = parentModel?.modelName ?? '-'
+  const normalizedCurrentUserId = currentUserId?.trim() ?? ''
+  const normalizedSuffix = suffix.trim()
 
   const previewModelName = useMemo(() => {
-    const normalizedParentModelName = parentModel?.modelName ?? '-'
-    const normalizedSuffix = suffix.trim()
-    const normalizedUserId = currentUserId?.trim() || '{userId}'
+    const normalizedUserId = normalizedCurrentUserId || '{userId}'
 
     if (!normalizedSuffix) {
       return `${normalizedParentModelName}_{suffix}_${normalizedUserId}`
     }
 
     return `${normalizedParentModelName}_${normalizedSuffix}_${normalizedUserId}`
-  }, [currentUserId, parentModel, suffix])
+  }, [normalizedCurrentUserId, normalizedParentModelName, normalizedSuffix])
+
+  const finalModelName = useMemo(() => {
+    if (!normalizedCurrentUserId || !parentModel?.modelName) {
+      return null
+    }
+
+    return `${parentModel.modelName}_${normalizedSuffix}_${normalizedCurrentUserId}`
+  }, [normalizedCurrentUserId, normalizedSuffix, parentModel])
+
+  const remainingModelNameLength =
+    finalModelName === null ? null : MAX_MODEL_NAME_LENGTH - finalModelName.length
+  const isModelNameTooLong =
+    remainingModelNameLength !== null && remainingModelNameLength < 0
 
   const handleSubmit = async () => {
-    const normalizedSuffix = suffix.trim()
     if (!normalizedSuffix) {
       setFormErrorMessage('suffix를 입력해 주세요.')
+      return
+    }
+
+    if (!normalizedCurrentUserId) {
+      setFormErrorMessage('현재 사용자 정보를 확인한 뒤 다시 시도해 주세요.')
+      return
+    }
+
+    if (isModelNameTooLong) {
+      setFormErrorMessage('최종 Model Name이 1000자를 초과했습니다. suffix를 줄여 주세요.')
       return
     }
 
@@ -108,13 +133,24 @@ export function BranchModelCreateModal({
                   placeholder="예: hotfix"
                 />
                 <p className="text-[11px] text-[#738078]">
-                  최종 모델명은 `parent + suffix + userId` 규칙으로 생성됩니다.
+                  최종 모델명은 `parent + suffix + userId` 규칙으로 생성되며 최대 1000자까지 허용됩니다.
                 </p>
               </div>
 
               <div className="rounded-xl border border-[#DCE5E0] bg-white px-3 py-3">
                 <p className="text-[11px] font-semibold text-[#738078]">최종 Model Name Preview</p>
                 <p className="mt-1 break-all text-sm font-semibold text-[#22322B]">{previewModelName}</p>
+                <p
+                  className={`mt-2 text-[11px] ${
+                    isModelNameTooLong ? 'text-[#C5534B]' : 'text-[#738078]'
+                  }`}
+                >
+                  {remainingModelNameLength === null
+                    ? '현재 사용자 정보를 확인한 뒤 길이를 계산합니다.'
+                    : isModelNameTooLong
+                      ? `${Math.abs(remainingModelNameLength)}자 초과`
+                      : `남은 길이 ${remainingModelNameLength}자`}
+                </p>
               </div>
             </div>
           </section>
@@ -136,7 +172,10 @@ export function BranchModelCreateModal({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
             Cancel
           </Button>
-          <Button onClick={() => void handleSubmit()} disabled={isPending}>
+          <Button
+            onClick={() => void handleSubmit()}
+            disabled={isPending || !normalizedCurrentUserId || isModelNameTooLong}
+          >
             {isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
             Create
           </Button>

@@ -51,7 +51,7 @@ export function ModelCreateOrUpdateModal({
 
   const dialogDescription =
     mode === 'create'
-      ? 'root model 기본 정보를 입력합니다. 생성 시 parent_model은 비어 있고 기본 버전은 EDIT/OPERATE로 고정됩니다.'
+      ? 'root model 기본 정보를 입력합니다. root는 기준선으로 유지되며 상세 변경은 branch에서 수행합니다.'
       : 'root model의 공통 정보를 수정합니다. Model Name은 변경할 수 없습니다.'
 
   const handleSubmit = async () => {
@@ -89,7 +89,7 @@ export function ModelCreateOrUpdateModal({
             <div className="mb-3">
               <h3 className="text-sm font-semibold text-[#1F2D26]">기본 정보</h3>
               <p className="mt-1 text-xs text-[#65726B]">
-                Comm Interface는 생성 시 고정되며, root model은 parent 없이 관리됩니다.
+                root model은 기준 정보만 수정할 수 있으며, 상세 편집은 branch checkout 이후에만 가능합니다.
               </p>
             </div>
 
@@ -115,21 +115,6 @@ export function ModelCreateOrUpdateModal({
                   onChange={(event) => setMaker(event.target.value)}
                   placeholder="제조사명을 입력해 주세요."
                 />
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <div className="rounded-xl border border-[#E4EAE6] bg-white px-3 py-2">
-                <p className="text-[11px] font-semibold text-[#738078]">Comm Interface</p>
-                <p className="mt-1 text-sm text-[#22322B]">{interfaceType}</p>
-              </div>
-              <div className="rounded-xl border border-[#E4EAE6] bg-white px-3 py-2">
-                <p className="text-[11px] font-semibold text-[#738078]">Model Version</p>
-                <p className="mt-1 text-sm text-[#22322B]">EDIT</p>
-              </div>
-              <div className="rounded-xl border border-[#E4EAE6] bg-white px-3 py-2">
-                <p className="text-[11px] font-semibold text-[#738078]">Status</p>
-                <p className="mt-1 text-sm text-[#22322B]">OPERATE</p>
               </div>
             </div>
           </section>
