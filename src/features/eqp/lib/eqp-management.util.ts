@@ -91,6 +91,7 @@ export const buildEqpUpdateRequest = (
   detail: EqpManageDetail,
   override: Partial<EqpUpdateRequest> = {},
 ): EqpUpdateRequest => ({
+  commMode: override.commMode ?? detail.commMode,
   isDev: override.isDev ?? detail.isDev,
   routePartition: override.routePartition ?? detail.routePartition ?? 0,
   eqpIp: override.eqpIp ?? detail.eqpIp,

@@ -564,11 +564,16 @@ export function EqpManageFormModal({
         throw new Error('설비 관리 상세 정보를 불러오지 못했습니다.')
       }
 
+      if (!formState.commMode) {
+        throw new Error('Comm Mode를 선택해 주세요.')
+      }
+
       if (!formState.eqpIp.trim()) {
         throw new Error('EQP IP를 입력해 주세요.')
       }
 
       const request = buildEqpUpdateRequest(detail, {
+        commMode: formState.commMode,
         isDev: formState.isDev,
         routePartition: parseRequiredInteger(formState.routePartition, 'Route Partition', { min: 0 }),
         eqpIp: formState.eqpIp.trim(),
@@ -621,8 +626,8 @@ export function EqpManageFormModal({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="z-[60] max-h-[90vh] max-w-[920px] overflow-hidden rounded-2xl p-0" showCloseButton={!isPending}>
-        <div className="flex max-h-[90vh] flex-col">
-          <DialogHeader className="border-b border-[#E4EAE6] px-6 py-5">
+        <div className="flex max-h-[90vh] min-h-0 flex-col">
+          <DialogHeader className="shrink-0 border-b border-[#E4EAE6] px-6 py-5">
             <DialogTitle>{mode === 'create' ? `${resolvedInterfaceType} Eqp Create` : 'Eqp Info Update'}</DialogTitle>
             <DialogDescription>
               {mode === 'create'
@@ -631,7 +636,7 @@ export function EqpManageFormModal({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
             {mode === 'update' && isLoading && !detail ? (
               <div className="flex min-h-60 items-center justify-center text-sm text-[#65726B]">
                 <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
@@ -660,28 +665,24 @@ export function EqpManageFormModal({
 
                     <ReadOnlyField label="Comm Interface" value={resolvedInterfaceType} />
 
-                    {mode === 'create' ? (
-                      <Field label="Comm Mode" required>
-                        <Select
-                          value={toSelectValue(formState.commMode)}
-                          onValueChange={handleSelectChange('commMode')}
-                          disabled={isPending}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Comm Mode를 선택해 주세요." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {EQP_COMM_MODE_OPTIONS.map((commMode) => (
-                              <SelectItem key={commMode} value={commMode}>
-                                {commMode}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                    ) : (
-                      <ReadOnlyField label="Comm Mode" value={formState.commMode} />
-                    )}
+                    <Field label="Comm Mode" required>
+                      <Select
+                        value={toSelectValue(formState.commMode)}
+                        onValueChange={handleSelectChange('commMode')}
+                        disabled={isPending}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Comm Mode를 선택해 주세요." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {EQP_COMM_MODE_OPTIONS.map((commMode) => (
+                            <SelectItem key={commMode} value={commMode}>
+                              {commMode}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
 
                     <ToggleField
                       label="Is Dev"
@@ -758,7 +759,13 @@ export function EqpManageFormModal({
                     description="생성 시점에 연결할 모델 버전과 Business Jar를 선택합니다."
                   >
                     <div className="grid gap-4 md:grid-cols-2">
-                      <Field label="Model Name" required hint={modelSelectionHint}>
+                      <ReadOnlyField
+                        label="허용 모델 상태"
+                        value={`${resolveAllowedModelStatus(formState.isDev)} / ${resolvedInterfaceType}`}
+                        hint={modelSelectionHint}
+                      />
+
+                      <Field label="Model Name" required>
                         <Select
                           value={toSelectValue(formState.modelName)}
                           onValueChange={handleSelectChange('modelName')}
@@ -1109,7 +1116,7 @@ export function EqpManageFormModal({
             )}
           </div>
 
-          <DialogFooter className="border-t border-[#E4EAE6] px-6 py-4 sm:justify-end">
+          <DialogFooter className="shrink-0 border-t border-[#E4EAE6] px-6 py-4 sm:justify-end">
             <Button
               type="button"
               variant="outline"

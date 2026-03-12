@@ -282,6 +282,7 @@ export interface EqpCreateRequest {
  * EQP 수정 요청 DTO 입니다.
  */
 export interface EqpUpdateRequest {
+  commMode: string
   isDev: boolean
   routePartition: number
   eqpIp: string
