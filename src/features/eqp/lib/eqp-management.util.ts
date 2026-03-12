@@ -11,7 +11,7 @@ import type {
 } from '../types/eqp.types'
 
 export const EQP_COMM_MODE_OPTIONS = ['ACTIVE', 'PASSIVE'] as const
-export const EQP_LOG_LEVEL_OPTIONS = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'] as const
+export const EQP_LOG_LEVEL_OPTIONS = ['INFO', 'DEBUG', 'TRACE', 'WARN', 'ERROR'] as const
 export const EQP_SELECT_NONE_VALUE = '__NONE__'
 
 export const DEFAULT_EQP_LOG_SETTINGS: EqpLogSettings = {

@@ -78,7 +78,7 @@ function SelectContent({
       <SelectPrimitive.Content
         data-slot="select-content"
         className={cn(
-          'relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-xl border border-[#E4EAE6] bg-white text-[#243129] shadow-xl data-[state=closed]:animate-out data-[state=open]:animate-in',
+          'relative z-[80] max-h-96 min-w-[8rem] overflow-hidden rounded-xl border border-[#E4EAE6] bg-white text-[#243129] shadow-xl data-[state=closed]:animate-out data-[state=open]:animate-in',
           position === 'popper' &&
             'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
           className,
@@ -88,7 +88,11 @@ function SelectContent({
       >
         <SelectScrollUpButton />
         <SelectPrimitive.Viewport
-          className={cn('p-1', position === 'popper' && 'h-[var(--radix-select-trigger-height)]')}
+          className={cn(
+            'p-1',
+            position === 'popper' &&
+              'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]',
+          )}
         >
           {children}
         </SelectPrimitive.Viewport>

@@ -121,6 +121,39 @@ const toFieldString = (value: string | number | null | undefined): string =>
 
 const toSelectValue = (value: string): string | undefined => (value ? value : undefined)
 
+const resolveSelectableOption = (value: string | null | undefined): string | null => {
+  if (!value) {
+    return null
+  }
+
+  const normalized = value.trim()
+  if (!normalized || normalized === EQP_SELECT_NONE_VALUE) {
+    return null
+  }
+
+  return normalized
+}
+
+const buildSelectOptions = (
+  baseOptions: readonly string[],
+  ...extraValues: Array<string | null | undefined>
+): string[] => {
+  const seen = new Set<string>()
+  const mergedOptions: string[] = []
+
+  for (const value of [...baseOptions, ...extraValues]) {
+    const normalized = resolveSelectableOption(value)
+    if (!normalized || seen.has(normalized)) {
+      continue
+    }
+
+    seen.add(normalized)
+    mergedOptions.push(normalized)
+  }
+
+  return mergedOptions
+}
+
 const resolveOptionalSelectValue = (value: string): string | null => {
   const normalized = value.trim()
   if (!normalized || normalized === EQP_SELECT_NONE_VALUE) {
@@ -388,6 +421,37 @@ export function EqpManageFormModal({
     () => getModelVersionOptions(filteredModelOptions, formState.modelName),
     [filteredModelOptions, formState.modelName],
   )
+  const gatewayJarOptions = useMemo(
+    () =>
+      buildSelectOptions(
+        options?.gatewayJarFileNames ?? [],
+        detail?.jars?.gatewayJarFileName,
+        formState.gatewayJarFileName,
+      ),
+    [options?.gatewayJarFileNames, detail?.jars?.gatewayJarFileName, formState.gatewayJarFileName],
+  )
+  const businessJarOptions = useMemo(
+    () =>
+      buildSelectOptions(
+        options?.businessJarFileNames ?? [],
+        detail?.jars?.businessJarFileName,
+        formState.businessJarFileName,
+      ),
+    [options?.businessJarFileNames, detail?.jars?.businessJarFileName, formState.businessJarFileName],
+  )
+  const socketProtocolTypeOptions = useMemo(
+    () =>
+      buildSelectOptions(
+        options?.socketProtocolTypes ?? [],
+        detail?.socketSettings?.socketProtocolType,
+        formState.socketProtocolType,
+      ),
+    [
+      options?.socketProtocolTypes,
+      detail?.socketSettings?.socketProtocolType,
+      formState.socketProtocolType,
+    ],
+  )
 
   useEffect(() => {
     if (!open) {
@@ -625,8 +689,11 @@ export function EqpManageFormModal({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="z-[60] max-h-[90vh] max-w-[920px] overflow-hidden rounded-2xl p-0" showCloseButton={!isPending}>
-        <div className="flex max-h-[90vh] min-h-0 flex-col">
+      <DialogContent
+        className="z-[60] flex max-h-[90dvh] max-w-[920px] flex-col overflow-hidden rounded-2xl p-0"
+        showCloseButton={!isPending}
+      >
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <DialogHeader className="shrink-0 border-b border-[#E4EAE6] px-6 py-5">
             <DialogTitle>{mode === 'create' ? `${resolvedInterfaceType} Eqp Create` : 'Eqp Info Update'}</DialogTitle>
             <DialogDescription>
@@ -636,7 +703,7 @@ export function EqpManageFormModal({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-6 py-5">
             {mode === 'update' && isLoading && !detail ? (
               <div className="flex min-h-60 items-center justify-center text-sm text-[#65726B]">
                 <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
@@ -742,7 +809,7 @@ export function EqpManageFormModal({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value={EQP_SELECT_NONE_VALUE}>미선택</SelectItem>
-                          {(options?.gatewayJarFileNames ?? []).map((fileName) => (
+                          {gatewayJarOptions.map((fileName) => (
                             <SelectItem key={fileName} value={fileName}>
                               {fileName}
                             </SelectItem>
@@ -812,16 +879,16 @@ export function EqpManageFormModal({
                           onValueChange={handleSelectChange('businessJarFileName')}
                           disabled={isPending || isOptionsLoading}
                         >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Business Jar를 선택해 주세요." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={EQP_SELECT_NONE_VALUE}>미선택</SelectItem>
-                            {(options?.businessJarFileNames ?? []).map((fileName) => (
-                              <SelectItem key={fileName} value={fileName}>
-                                {fileName}
-                              </SelectItem>
-                            ))}
+                        <SelectTrigger>
+                          <SelectValue placeholder="Business Jar를 선택해 주세요." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={EQP_SELECT_NONE_VALUE}>미선택</SelectItem>
+                          {businessJarOptions.map((fileName) => (
+                            <SelectItem key={fileName} value={fileName}>
+                              {fileName}
+                            </SelectItem>
+                          ))}
                           </SelectContent>
                         </Select>
                       </Field>
@@ -1013,18 +1080,18 @@ export function EqpManageFormModal({
                           onValueChange={handleSelectChange('socketProtocolType')}
                           disabled={isPending || isOptionsLoading}
                         >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Socket Protocol Type을 선택해 주세요." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(options?.socketProtocolTypes ?? []).map((protocolType) => (
-                              <SelectItem key={protocolType} value={protocolType}>
-                                {protocolType}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Socket Protocol Type을 선택해 주세요." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {socketProtocolTypeOptions.map((protocolType) => (
+                            <SelectItem key={protocolType} value={protocolType}>
+                              {protocolType}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
 
                       <Field label="Charset">
                         <Input
