@@ -5,6 +5,7 @@ import {
   DEFAULT_AUTH_ERROR_MESSAGE,
   createLoginFailResponse,
   isLoginSuccessResponse,
+  type LoginFailResponse,
   type LoginRequest,
   type LoginResponse,
   type LoginSuccessResponse,
@@ -13,6 +14,17 @@ import {
 const CSRF_COOKIE_NAME = 'XSRF-TOKEN'
 const CSRF_HEADER_NAME = 'X-XSRF-TOKEN'
 const DEFAULT_LOGOUT_ERROR_MESSAGE = '로그아웃 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'
+const LOGIN_CSRF_FORBIDDEN_MESSAGE =
+  '로그인 보안 토큰 발급이 차단되었습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요. 문제가 계속되면 백엔드의 CSRF/CORS 설정을 확인해 주세요.'
+const LOGIN_FORBIDDEN_MESSAGE =
+  '로그인 보안 검증에 실패했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요. 문제가 계속되면 백엔드의 CSRF/CORS 설정을 확인해 주세요.'
+const LOGOUT_CSRF_FORBIDDEN_MESSAGE =
+  '로그아웃 보안 토큰 발급이 차단되었습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.'
+const LOGOUT_FORBIDDEN_MESSAGE =
+  '로그아웃 보안 검증에 실패했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.'
+
+type AuthErrorContext = 'login-csrf' | 'login-submit' | 'logout-csrf' | 'logout-submit'
+type CsrfRequestPurpose = 'login' | 'logout'
 
 /**
  * document.cookie에서 쿠키 값을 읽어 옵니다.
@@ -35,12 +47,73 @@ const getCookieValue = (name: string): string | null => {
 }
 
 /**
- * 로그인 전 CSRF 쿠키를 발급받고, 헤더에 사용할 토큰 값을 반환합니다.
+ * 403 Forbidden 응답을 요청 문맥별 사용자 안내 메시지로 변환합니다.
  */
-const issueCsrfToken = async (): Promise<string> => {
-  await apiClient.get('/auth/csrf', {
-    withCredentials: true,
-  })
+const buildForbiddenAuthResponse = (context: AuthErrorContext): LoginFailResponse => {
+  switch (context) {
+    case 'login-csrf':
+      return {
+        success: false,
+        data: null,
+        errorCode: 'LOGIN_CSRF_FORBIDDEN',
+        errorMsg: LOGIN_CSRF_FORBIDDEN_MESSAGE,
+      }
+    case 'login-submit':
+      return {
+        success: false,
+        data: null,
+        errorCode: 'LOGIN_FORBIDDEN',
+        errorMsg: LOGIN_FORBIDDEN_MESSAGE,
+      }
+    case 'logout-csrf':
+      return {
+        success: false,
+        data: null,
+        errorCode: 'LOGOUT_CSRF_FORBIDDEN',
+        errorMsg: LOGOUT_CSRF_FORBIDDEN_MESSAGE,
+      }
+    case 'logout-submit':
+      return {
+        success: false,
+        data: null,
+        errorCode: 'LOGOUT_FORBIDDEN',
+        errorMsg: LOGOUT_FORBIDDEN_MESSAGE,
+      }
+  }
+}
+
+/**
+ * 인증 API에서 403이 발생했을 때 요청 문맥에 맞는 안내 메시지로 보정합니다.
+ * 로그인/로그아웃 공개 엔드포인트의 403은 대부분 CSRF 또는 CORS 보안 정책 불일치이므로
+ * 스프링 기본 Forbidden payload 대신 사용자가 바로 조치할 수 있는 문구를 우선 노출합니다.
+ */
+const createContextualAuthFailResponse = (
+  payload: unknown,
+  status: number | undefined,
+  fallbackMessage: string,
+  context: AuthErrorContext
+): LoginFailResponse => {
+  if (status === 403) {
+    return buildForbiddenAuthResponse(context)
+  }
+
+  return createLoginFailResponse(payload, fallbackMessage)
+}
+
+/**
+ * 로그인/로그아웃 전에 필요한 CSRF 쿠키를 발급받고, 헤더에 사용할 토큰 값을 반환합니다.
+ */
+const issueCsrfToken = async (purpose: CsrfRequestPurpose): Promise<string> => {
+  try {
+    await apiClient.get('/auth/csrf', {
+      withCredentials: true,
+    })
+  } catch (error) {
+    const fallbackMessage =
+      purpose === 'login' ? DEFAULT_AUTH_ERROR_MESSAGE : DEFAULT_LOGOUT_ERROR_MESSAGE
+    const errorContext: AuthErrorContext = purpose === 'login' ? 'login-csrf' : 'logout-csrf'
+    throw normalizeAuthError(error, fallbackMessage, errorContext)
+  }
 
   const csrfToken = getCookieValue(CSRF_COOKIE_NAME)
 
@@ -63,7 +136,8 @@ const issueCsrfToken = async (): Promise<string> => {
  */
 const normalizeAuthError = (
   error: unknown,
-  fallbackMessage = DEFAULT_AUTH_ERROR_MESSAGE
+  fallbackMessage = DEFAULT_AUTH_ERROR_MESSAGE,
+  context: AuthErrorContext = 'login-submit'
 ): AuthApiError => {
   if (error instanceof AuthApiError) {
     return error
@@ -71,12 +145,12 @@ const normalizeAuthError = (
 
   if (isAxiosError(error)) {
     return new AuthApiError(
-      createLoginFailResponse(error.response?.data, fallbackMessage),
+      createContextualAuthFailResponse(error.response?.data, error.response?.status, fallbackMessage, context),
       error.response?.status
     )
   }
 
-  return new AuthApiError(createLoginFailResponse(error, fallbackMessage))
+  return new AuthApiError(createContextualAuthFailResponse(error, undefined, fallbackMessage, context))
 }
 
 export const authApi = {
@@ -84,16 +158,16 @@ export const authApi = {
    * 로그인 요청에서 사용할 CSRF 토큰을 미리 확보합니다.
    * 이후 다른 상태 변경 API(POST/PUT/PATCH/DELETE)에서도 같은 규칙으로 재사용할 수 있습니다.
    */
-  prepareCsrfToken: issueCsrfToken,
+  prepareCsrfToken: () => issueCsrfToken('login'),
 
   /**
    * 로그인 API를 호출합니다.
    * - GET /api/auth/csrf 선호출
    * - POST /api/auth/login 호출 시 withCredentials + X-XSRF-TOKEN 헤더 포함
    * - token 본문 의존 없이 쿠키 기반 인증만 사용
-   */
+  */
   login: async (credentials: LoginRequest): Promise<LoginSuccessResponse> => {
-    const csrfToken = await issueCsrfToken()
+    const csrfToken = await issueCsrfToken('login')
 
     try {
       const response = await apiClient.post<LoginResponse>('/auth/login', credentials, {
@@ -115,9 +189,17 @@ export const authApi = {
         return parsedResponse
       }
 
-      throw new AuthApiError(createLoginFailResponse(parsedResponse), response.status)
+      throw new AuthApiError(
+        createContextualAuthFailResponse(
+          parsedResponse,
+          response.status,
+          DEFAULT_AUTH_ERROR_MESSAGE,
+          'login-submit'
+        ),
+        response.status
+      )
     } catch (error) {
-      const normalizedError = normalizeAuthError(error)
+      const normalizedError = normalizeAuthError(error, DEFAULT_AUTH_ERROR_MESSAGE, 'login-submit')
       console.warn('[authApi] login failed', {
         status: normalizedError.status,
         errorCode: normalizedError.payload.errorCode,
@@ -130,9 +212,9 @@ export const authApi = {
    * 로그아웃 API를 호출하여 서버 세션/쿠키를 무효화합니다.
    * - POST /api/auth/logout 호출 전 CSRF 토큰을 발급받아 헤더에 포함합니다.
    * - 401은 이미 인증이 만료된 상태일 수 있으므로 로그아웃 완료로 간주합니다.
-   */
+  */
   logout: async (): Promise<void> => {
-    const csrfToken = await issueCsrfToken()
+    const csrfToken = await issueCsrfToken('logout')
 
     try {
       const response = await apiClient.post('/auth/logout', null, {
@@ -150,14 +232,23 @@ export const authApi = {
 
       if (response.status >= 400) {
         throw new AuthApiError(
-          createLoginFailResponse(response.data, DEFAULT_LOGOUT_ERROR_MESSAGE),
+          createContextualAuthFailResponse(
+            response.data,
+            response.status,
+            DEFAULT_LOGOUT_ERROR_MESSAGE,
+            'logout-submit'
+          ),
           response.status
         )
       }
 
       console.info('[authApi] logout success')
     } catch (error) {
-      const normalizedError = normalizeAuthError(error, DEFAULT_LOGOUT_ERROR_MESSAGE)
+      const normalizedError = normalizeAuthError(
+        error,
+        DEFAULT_LOGOUT_ERROR_MESSAGE,
+        'logout-submit'
+      )
       console.warn('[authApi] logout failed', {
         status: normalizedError.status,
         errorCode: normalizedError.payload.errorCode,
