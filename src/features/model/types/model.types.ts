@@ -72,6 +72,7 @@ export interface ModelInfoUpdateRequest {
  */
 export interface ModelBranchCreateRequest {
   suffix: string
+  sourceModelVersionKey?: number | null
 }
 
 /**

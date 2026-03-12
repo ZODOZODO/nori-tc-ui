@@ -90,10 +90,8 @@ export function EqpModelBindingModal({
       return
     }
 
-    setSelectedModelName(detail?.modelBinding?.modelName ?? '')
-    setSelectedModelVersionKey(
-      detail?.modelBinding?.modelVersionKey ? String(detail.modelBinding.modelVersionKey) : '',
-    )
+    setSelectedModelName('')
+    setSelectedModelVersionKey('')
     setSelectedBusinessJarFileName(detail?.jars?.businessJarFileName ?? EQP_SELECT_NONE_VALUE)
     setLocalErrorMessage(null)
   }, [open, detail])
@@ -103,19 +101,22 @@ export function EqpModelBindingModal({
       return
     }
 
-    if (modelNameOptions.length === 0) {
-      if (!selectedModelName && !selectedModelVersionKey) {
-        return
+    if (modelNameOptions.length === 0 || !selectedModelName) {
+      if (selectedModelVersionKey) {
+        setSelectedModelVersionKey('')
       }
-
-      setSelectedModelName('')
-      setSelectedModelVersionKey('')
       return
     }
 
-    const nextModelName = modelNameOptions.includes(selectedModelName)
-      ? selectedModelName
-      : modelNameOptions[0]
+    if (!modelNameOptions.includes(selectedModelName)) {
+      setSelectedModelName('')
+      if (selectedModelVersionKey) {
+        setSelectedModelVersionKey('')
+      }
+      return
+    }
+
+    const nextModelName = selectedModelName
     const nextVersionOptions = getModelVersionOptions(filteredModelOptions, nextModelName)
     const hasSelectedVersion = nextVersionOptions.some(
       (option) => String(option.modelVersionKey) === selectedModelVersionKey,
@@ -123,10 +124,6 @@ export function EqpModelBindingModal({
     const nextModelVersionKey = hasSelectedVersion
       ? selectedModelVersionKey
       : String(nextVersionOptions[0]?.modelVersionKey ?? '')
-
-    if (nextModelName !== selectedModelName) {
-      setSelectedModelName(nextModelName)
-    }
 
     if (nextModelVersionKey !== selectedModelVersionKey) {
       setSelectedModelVersionKey(nextModelVersionKey)

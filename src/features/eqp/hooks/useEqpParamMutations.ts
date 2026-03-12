@@ -18,11 +18,16 @@ interface CheckinVariables {
   request: EqpCheckinRequest
 }
 
+interface UndoCheckoutVariables {
+  eqpId: string
+}
+
 /**
  * EQP 파라미터 체크아웃 / 저장 / 체크인 mutation 훅 모음입니다.
  *
  * - checkoutMutation: 성공 시 checkoutStatus, params(EDIT) 캐시 무효화
  * - saveEditParamsMutation: 성공 시 EDIT 파라미터 캐시 무효화
+ * - undoCheckoutMutation: 성공 시 checkoutStatus, params 캐시 무효화
  * - checkinMutation: 성공 시 paramVersions, checkoutStatus, params 캐시 전체 무효화
  */
 export function useEqpParamMutations() {
@@ -45,6 +50,15 @@ export function useEqpParamMutations() {
     },
   })
 
+  const undoCheckoutMutation = useMutation({
+    mutationFn: ({ eqpId }: UndoCheckoutVariables) => eqpApi.undoEqpCheckout(eqpId),
+    onSuccess: async (_, variables) => {
+      // 체크아웃 취소 후 상태/파라미터 캐시를 무효화해 EDIT 흔적을 제거한다.
+      await queryClient.invalidateQueries({ queryKey: eqpQueryKeys.checkoutStatus(variables.eqpId) })
+      await queryClient.invalidateQueries({ queryKey: eqpQueryKeys.paramsRoot(variables.eqpId) })
+    },
+  })
+
   const checkinMutation = useMutation({
     mutationFn: ({ eqpId, request }: CheckinVariables) => eqpApi.checkinEqp(eqpId, request),
     onSuccess: async (_, variables) => {
@@ -58,6 +72,7 @@ export function useEqpParamMutations() {
   return {
     checkoutMutation,
     saveEditParamsMutation,
+    undoCheckoutMutation,
     checkinMutation,
   }
 }

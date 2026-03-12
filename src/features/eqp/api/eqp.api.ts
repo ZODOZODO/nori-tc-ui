@@ -452,6 +452,33 @@ export const eqpApi = {
   },
 
   /**
+   * 설비 파라미터 체크아웃을 되돌리고 EDIT 버전을 삭제합니다.
+   */
+  undoEqpCheckout: async (eqpId: string): Promise<void> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.delete<EqpDualCommandResponse>(
+          `/eqp/${encodeURIComponent(eqpId)}/checkout`,
+          {
+            withCredentials: true,
+            headers: { [CSRF_HEADER_NAME]: csrfToken },
+            validateStatus: (status) => status >= 200 && status < 600,
+          },
+        ),
+      )
+
+      resolveSuccessPayload<null>(
+        response.data,
+        response.status,
+        '체크아웃 되돌리기에 실패했습니다.',
+        true,
+      )
+    } catch (error) {
+      throw normalizeEqpError(error, '체크아웃 되돌리기에 실패했습니다.')
+    }
+  },
+
+  /**
    * 설비 파라미터를 체크인합니다.
    */
   checkinEqp: async (eqpId: string, request: EqpCheckinRequest): Promise<void> => {

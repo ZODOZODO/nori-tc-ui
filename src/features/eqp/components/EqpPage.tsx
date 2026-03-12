@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { CircleUserRound, Loader2, LogOut } from 'lucide-react'
+import { CircleUserRound, Loader2, LogOut, RotateCcw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { CheckInModal } from './CheckInModal'
@@ -37,6 +37,7 @@ import {
 } from '../types/eqp.types'
 import { groupEqpItems } from '../utils/eqp-group.util'
 import { UserProfileModal } from '@/features/profile/components/UserProfileModal'
+import { useMe } from '@/features/profile/hooks/useProfile'
 
 const LOGIN_ROUTE = '/login'
 const CSRF_COOKIE_NAME = 'XSRF-TOKEN'
@@ -52,6 +53,8 @@ const PANEL_MIN_PERCENT = 15
 const PANEL_MAX_PERCENT = 85
 const PANEL_INITIAL_TOP_PERCENT = 35
 
+type EditableEqpParamRow = EqpParamRow & { rowId: string }
+
 type EqpManagementDialogState =
   | { type: 'none' }
   | { type: 'create'; interfaceType: ProtocolType }
@@ -61,6 +64,26 @@ type EqpManagementDialogState =
   | { type: 'delete'; eqpId: string }
 
 const EMPTY_MANAGEMENT_DIALOG_STATE: EqpManagementDialogState = { type: 'none' }
+
+/**
+ * 편집 중인 파라미터 행을 안정적으로 식별하기 위한 임시 키를 생성합니다.
+ * paramName은 사용자가 수정할 수 있으므로 React key와 수정 대상 식별자로 사용할 수 없습니다.
+ */
+const createEditableParamRowId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `eqp-param-row-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+}
+
+/**
+ * API 파라미터 행을 편집 가능한 로컬 행 모델로 변환합니다.
+ */
+const toEditableParamRow = (row: EqpParamRow): EditableEqpParamRow => ({
+  rowId: createEditableParamRowId(),
+  ...row,
+})
 
 /**
  * 상단 네비게이션 메뉴 구성입니다.
@@ -153,6 +176,8 @@ export function EqpPage() {
 
   // selection에서 현재 선택된 eqpId 파생 (eqp 타입일 때만 유효)
   const selectedEqpId = selection.type === 'eqp' ? selection.eqpId : null
+  const meQuery = useMe(Boolean(selectedEqpId))
+  const currentUserId = meQuery.data?.userId ?? null
 
   const eqpListQuery = useEqpList()
   const eqpDetailQuery = useEqpDetail(selectedEqpId)
@@ -180,7 +205,7 @@ export function EqpPage() {
   )
 
   // 편집 중 로컬 상태 (편집 내용을 임시 보관)
-  const [localEditRows, setLocalEditRows] = useState<EqpParamRow[]>([])
+  const [localEditRows, setLocalEditRows] = useState<EditableEqpParamRow[]>([])
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false)
   const [checkInErrorMessage, setCheckInErrorMessage] = useState<string | null>(null)
   const [isLogoutPending, setIsLogoutPending] = useState(false)
@@ -198,7 +223,8 @@ export function EqpPage() {
   const isCheckoutSubmittingRef = useRef(false)
 
   const { createEqpMutation, updateEqpMutation, deleteEqpMutation } = useEqpMutations()
-  const { checkoutMutation, saveEditParamsMutation, checkinMutation } = useEqpParamMutations()
+  const { checkoutMutation, saveEditParamsMutation, undoCheckoutMutation, checkinMutation } =
+    useEqpParamMutations()
   const eqpItems = useMemo(() => resolveEqpItems(eqpListQuery.data as unknown), [eqpListQuery.data])
   // "EDIT"은 체크아웃 잠금용 내부 버전이므로 드롭다운에서 제외합니다.
   // "EDIT"을 sourceVersion으로 체크아웃하면 기존 EDIT 행과 중복 키 충돌이 발생합니다.
@@ -214,6 +240,13 @@ export function EqpPage() {
     isCheckedOut: checkoutStatusQuery.data?.isCheckedOut ?? false,
     checkedOutBy: checkoutStatusQuery.data?.checkedOutBy ?? null,
   }), [checkoutStatusQuery.data])
+  const isCheckedOutByCurrentUser = useMemo(() => {
+    if (!checkoutStatus.isCheckedOut || !currentUserId) {
+      return false
+    }
+
+    return checkoutStatus.checkedOutBy === currentUserId
+  }, [checkoutStatus.checkedOutBy, checkoutStatus.isCheckedOut, currentUserId])
 
   // 전체 eqpItems 기준으로 그룹화 (gateway_group 선택 시 설비 목록 조회용)
   const { gatewayGroups } = useMemo(() => groupEqpItems(eqpItems), [eqpItems])
@@ -345,13 +378,15 @@ export function EqpPage() {
       return
     }
     const editData = editParamsQuery.data
-    if (editData && editData.length > 0) {
-      setLocalEditRows(editData.map((p) => ({
-        paramName: p.paramName,
-        paramValue: p.paramValue ?? '',
-        description: p.description ?? '',
-      })))
-    }
+    setLocalEditRows(
+      (editData ?? []).map((p) =>
+        toEditableParamRow({
+          paramName: p.paramName,
+          paramValue: p.paramValue ?? '',
+          description: p.description ?? '',
+        }),
+      ),
+    )
   }, [isEditMode, editParamsQuery.data])
 
   /**
@@ -386,10 +421,10 @@ export function EqpPage() {
     if (!selectedEqpId) {
       return
     }
-    if (checkoutStatus.isCheckedOut && !isEditMode) {
+    if (isCheckedOutByCurrentUser && !isEditMode) {
       setEditMode(true)
     }
-  }, [selectedEqpId, checkoutStatus.isCheckedOut, isEditMode, setEditMode])
+  }, [selectedEqpId, isCheckedOutByCurrentUser, isEditMode, setEditMode])
 
   /**
    * 개별 설비 선택 처리.
@@ -522,19 +557,126 @@ export function EqpPage() {
   }
 
   /**
-   * 파라미터 값 변경 (편집 모드에서 로컬 상태 업데이트)
+   * 편집 행의 특정 필드를 갱신합니다.
    */
-  const handleParamValueChange = (paramName: string, nextValue: string) => {
+  const updateLocalEditRow = useCallback((
+    rowId: string,
+    field: 'paramName' | 'paramValue' | 'description',
+    nextValue: string,
+  ) => {
     setLocalEditRows((prevRows) =>
-      prevRows.map((row) => (row.paramName === paramName ? { ...row, paramValue: nextValue } : row)),
+      prevRows.map((row) => (row.rowId === rowId ? { ...row, [field]: nextValue } : row)),
     )
-  }
+    setCheckInErrorMessage(null)
+  }, [])
+
+  const handleParamNameChange = useCallback((rowId: string, nextValue: string) => {
+    updateLocalEditRow(rowId, 'paramName', nextValue)
+  }, [updateLocalEditRow])
+
+  const handleParamValueChange = useCallback((rowId: string, nextValue: string) => {
+    updateLocalEditRow(rowId, 'paramValue', nextValue)
+  }, [updateLocalEditRow])
+
+  const handleParamDescriptionChange = useCallback((rowId: string, nextValue: string) => {
+    updateLocalEditRow(rowId, 'description', nextValue)
+  }, [updateLocalEditRow])
+
+  /**
+   * 편집용 빈 파라미터 행을 추가합니다.
+   */
+  const handleAddParamRow = useCallback(() => {
+    setLocalEditRows((prevRows) => [
+      ...prevRows,
+      {
+        rowId: createEditableParamRowId(),
+        paramName: '',
+        paramValue: '',
+        description: '',
+      },
+    ])
+    setCheckInErrorMessage(null)
+  }, [])
+
+  /**
+   * 편집 중인 파라미터 행을 제거합니다.
+   */
+  const handleDeleteParamRow = useCallback((rowId: string) => {
+    setLocalEditRows((prevRows) => prevRows.filter((row) => row.rowId !== rowId))
+    setCheckInErrorMessage(null)
+  }, [])
+
+  const duplicatedParamNames = useMemo(() => {
+    const duplicatedNames = new Set<string>()
+    const seenNames = new Set<string>()
+
+    localEditRows.forEach((row) => {
+      const normalizedParamName = row.paramName.trim()
+      if (!normalizedParamName) {
+        return
+      }
+
+      if (seenNames.has(normalizedParamName)) {
+        duplicatedNames.add(normalizedParamName)
+        return
+      }
+
+      seenNames.add(normalizedParamName)
+    })
+
+    return Array.from(duplicatedNames)
+  }, [localEditRows])
+
+  const hasBlankParamName = useMemo(
+    () => localEditRows.some((row) => row.paramName.trim().length === 0),
+    [localEditRows],
+  )
+  const isEditParamRowsLoading = isEditMode && editParamsQuery.isLoading
+
+  const paramEditValidationMessage = useMemo(() => {
+    if (!isEditMode) {
+      return null
+    }
+
+    if (isEditParamRowsLoading) {
+      return null
+    }
+
+    if (localEditRows.length === 0) {
+      return '저장할 파라미터가 없습니다. 행 추가로 행을 만들거나 Undo로 체크아웃을 취소해 주세요.'
+    }
+
+    if (hasBlankParamName) {
+      return 'Param Name은 비어 있을 수 없습니다.'
+    }
+
+    if (duplicatedParamNames.length > 0) {
+      return `중복된 Param Name이 있습니다: ${duplicatedParamNames[0]}`
+    }
+
+    return null
+  }, [duplicatedParamNames, hasBlankParamName, isEditMode, isEditParamRowsLoading, localEditRows.length])
 
   /**
    * Save 버튼 클릭: 로컬 편집 행을 DB EDIT 버전으로 저장합니다.
    */
   const handleSaveEditParams = async () => {
-    if (!selectedEqpId || localEditRows.length === 0) {
+    if (!selectedEqpId) {
+      return
+    }
+
+    if (localEditRows.length === 0) {
+      setCheckInErrorMessage('저장할 파라미터가 없습니다. 행 추가로 행을 추가하거나 Undo를 사용해 주세요.')
+      return
+    }
+
+    if (hasBlankParamName) {
+      setCheckInErrorMessage('Param Name은 비어 있을 수 없습니다.')
+      return
+    }
+
+    if (duplicatedParamNames.length > 0) {
+      setCheckInErrorMessage(`중복된 Param Name이 있습니다: ${duplicatedParamNames[0]}`)
       return
     }
 
@@ -543,7 +685,7 @@ export function EqpPage() {
       await saveEditParamsMutation.mutateAsync({
         eqpId: selectedEqpId,
         params: localEditRows.map((row) => ({
-          paramName: row.paramName,
+          paramName: row.paramName.trim(),
           paramValue: row.paramValue,
           description: row.description,
         })),
@@ -554,9 +696,28 @@ export function EqpPage() {
   }
 
   /**
-   * CheckInModal의 Save 클릭: 버전명으로 체크인합니다.
+   * Undo 버튼 클릭: 체크아웃 자체를 취소하고 EDIT 버전 파라미터를 모두 삭제합니다.
    */
-  const handleCheckInSave = async (version: string, description: string) => {
+  const handleUndoCheckout = async () => {
+    if (!selectedEqpId || !isEditMode) {
+      return
+    }
+
+    try {
+      setCheckInErrorMessage(null)
+      await undoCheckoutMutation.mutateAsync({ eqpId: selectedEqpId })
+      setLocalEditRows([])
+      setEditMode(false)
+      setIsCheckInModalOpen(false)
+    } catch (error) {
+      setCheckInErrorMessage(resolveErrorMessage(error, '체크아웃 되돌리기에 실패했습니다.'))
+    }
+  }
+
+  /**
+   * CheckInModal의 Save 클릭: 서버가 자동 생성한 버전으로 체크인합니다.
+   */
+  const handleCheckInSave = async (description: string) => {
     if (!selectedEqpId) {
       setCheckInErrorMessage('선택된 설비 정보가 없어 저장할 수 없습니다.')
       return
@@ -566,7 +727,7 @@ export function EqpPage() {
       setCheckInErrorMessage(null)
       await checkinMutation.mutateAsync({
         eqpId: selectedEqpId,
-        request: { newVersion: version, description },
+        request: { description },
       })
 
       setLocalEditRows([])
@@ -602,25 +763,18 @@ export function EqpPage() {
   }
 
   // 현재 파라미터 테이블에 표시할 행
-  const displayParamRows: EqpParamRow[] = useMemo(() => {
+  const displayParamRows = useMemo(() => {
     if (isEditMode) {
-      // 편집 모드: 로컬 편집 행 우선, 없으면 EDIT 버전 데이터
-      if (localEditRows.length > 0) {
-        return localEditRows
-      }
-      return (editParamsQuery.data ?? []).map((p) => ({
-        paramName: p.paramName,
-        paramValue: p.paramValue ?? '',
-        description: p.description ?? '',
-      }))
+      return localEditRows
     }
+
     // 읽기 모드: 선택된 버전 파라미터
     return (readParamsQuery.data ?? []).map((p) => ({
       paramName: p.paramName,
       paramValue: p.paramValue ?? '',
       description: p.description ?? '',
     }))
-  }, [isEditMode, localEditRows, editParamsQuery.data, readParamsQuery.data])
+  }, [isEditMode, localEditRows, readParamsQuery.data])
 
   /**
    * Mode 영역에 표시할 텍스트를 결정합니다.
@@ -659,6 +813,13 @@ export function EqpPage() {
     checkoutMutation.isPending ||
     isCheckoutSubmitting ||
     (checkoutStatus.isCheckedOut && !isEditMode)
+  const isSaveDisabled =
+    isEditParamRowsLoading ||
+    saveEditParamsMutation.isPending ||
+    undoCheckoutMutation.isPending ||
+    localEditRows.length === 0 ||
+    hasBlankParamName ||
+    duplicatedParamNames.length > 0
 
   // 사이드바에 전달할 선택된 그룹 인덱스
   const selectedGroupIndex = selection.type === 'gateway_group' ? selection.groupIndex : null
@@ -829,13 +990,28 @@ export function EqpPage() {
                       <div className="flex items-center gap-2">
                         {isEditMode ? (
                           <>
+                            {/* Undo 버튼: 현재 체크아웃과 EDIT 행 전체를 취소 */}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 rounded-[10px] border-[#B8C9C1] bg-[#F3F7F5] px-3 text-xs font-semibold text-[#1E3D33]"
+                              onClick={() => void handleUndoCheckout()}
+                              disabled={undoCheckoutMutation.isPending || saveEditParamsMutation.isPending}
+                            >
+                              {undoCheckoutMutation.isPending ? (
+                                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                              ) : (
+                                <RotateCcw className="size-3.5" aria-hidden="true" />
+                              )}
+                              Undo
+                            </Button>
                             {/* Save 버튼: 로컬 편집 내용을 DB EDIT 버전에 반영 */}
                             <Button
                               type="button"
                               variant="outline"
                               className="h-8 rounded-[10px] border-[#B8C9C1] bg-[#F3F7F5] px-3 text-xs font-semibold text-[#1E3D33]"
                               onClick={() => void handleSaveEditParams()}
-                              disabled={saveEditParamsMutation.isPending || localEditRows.length === 0}
+                              disabled={isSaveDisabled}
                             >
                               {saveEditParamsMutation.isPending ? (
                                 <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
@@ -891,11 +1067,20 @@ export function EqpPage() {
                       <p className="mt-2 text-xs text-[#C5534B]">{versionErrorMessage}</p>
                     ) : null}
 
+                    {!checkInErrorMessage && paramEditValidationMessage ? (
+                      <p className="mt-2 text-xs text-[#C5534B]">{paramEditValidationMessage}</p>
+                    ) : null}
+
                     <div className="mt-3 min-h-0 flex-1 border-t border-[#E4EAE6] pt-3">
                       <EqpParamTable
                         rows={displayParamRows}
                         isEditMode={isEditMode}
+                        isLoading={isEditMode ? editParamsQuery.isLoading : readParamsQuery.isLoading}
+                        onChangeParamName={handleParamNameChange}
                         onChangeValue={handleParamValueChange}
+                        onChangeDescription={handleParamDescriptionChange}
+                        onAddRow={handleAddParamRow}
+                        onDeleteRow={handleDeleteParamRow}
                       />
                     </div>
                   </section>
@@ -911,7 +1096,7 @@ export function EqpPage() {
         isPending={checkinMutation.isPending}
         errorMessage={checkInErrorMessage}
         onOpenChange={setIsCheckInModalOpen}
-        onSave={(version, description) => void handleCheckInSave(version, description)}
+        onSave={(description) => void handleCheckInSave(description)}
         onCancel={() => setIsCheckInModalOpen(false)}
       />
 

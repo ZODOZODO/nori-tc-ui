@@ -472,7 +472,6 @@ export interface EqpParamSaveItem {
  * 체크인 요청 DTO입니다.
  */
 export interface EqpCheckinRequest {
-  newVersion: string
   description: string
 }
 

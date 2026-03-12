@@ -261,6 +261,32 @@ export function ModelPage() {
     return sortByUpdatedAtDesc(modelItems.filter((item) => item.modelName === selectedModel.modelName))
   }, [modelItems, selectedModel])
 
+  const branchCreateSourceVersions = useMemo(() => {
+    if (!branchCreateTargetModel) {
+      return []
+    }
+
+    return sortByUpdatedAtDesc(
+      modelItems.filter((item) => item.modelKey === branchCreateTargetModel.modelKey),
+    )
+  }, [branchCreateTargetModel, modelItems])
+
+  const defaultBranchCreateSourceModelVersionKey = useMemo(() => {
+    if (!branchCreateTargetModel) {
+      return null
+    }
+
+    if (
+      selectedModel &&
+      selectedModel.modelKey === branchCreateTargetModel.modelKey &&
+      !selectedModel.parentModel
+    ) {
+      return selectedModel.modelVersionKey
+    }
+
+    return branchCreateTargetModel.modelVersionKey
+  }, [branchCreateTargetModel, selectedModel])
+
   const activeTabModel = useMemo(() => {
     if (activeTab === null) {
       return null
@@ -633,7 +659,7 @@ export function ModelPage() {
     setIsBranchCreateModalOpen(open)
   }
 
-  const handleSubmitBranchCreate = async (request: { suffix: string }) => {
+  const handleSubmitBranchCreate = async (request: { suffix: string; sourceModelVersionKey: number }) => {
     if (!branchCreateTargetModel) {
       return
     }
@@ -1199,6 +1225,8 @@ export function ModelPage() {
         key={`${branchCreateTargetModel?.modelKey ?? 'none'}-${isBranchCreateModalOpen ? 'open' : 'closed'}`}
         open={isBranchCreateModalOpen}
         parentModel={branchCreateTargetModel}
+        sourceVersions={branchCreateSourceVersions}
+        defaultSourceModelVersionKey={defaultBranchCreateSourceModelVersionKey}
         currentUserId={currentUserId}
         isPending={createBranchModelMutation.isPending}
         errorMessage={branchCreateErrorMessage}

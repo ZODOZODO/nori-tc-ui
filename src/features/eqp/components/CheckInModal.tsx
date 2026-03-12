@@ -15,13 +15,13 @@ interface CheckInModalProps {
   isPending: boolean
   errorMessage: string | null
   onOpenChange: (open: boolean) => void
-  onSave: (version: string, description: string) => void
+  onSave: (description: string) => void
   onCancel: () => void
 }
 
 /**
  * Check In 동작을 확인하는 모달입니다.
- * 버전명(필수)과 변경 설명(선택)을 입력하고 저장합니다.
+ * 버전은 서버가 자동 생성하고, 사용자는 변경 설명만 입력합니다.
  */
 export function CheckInModal({
   open,
@@ -31,14 +31,12 @@ export function CheckInModal({
   onSave,
   onCancel,
 }: CheckInModalProps) {
-  const [version, setVersion] = useState('')
   const [description, setDescription] = useState('')
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!isPending) {
       // 모달이 닫힐 때 입력값 초기화
       if (!nextOpen) {
-        setVersion('')
         setDescription('')
       }
       onOpenChange(nextOpen)
@@ -46,10 +44,7 @@ export function CheckInModal({
   }
 
   const handleSave = () => {
-    if (!version.trim()) {
-      return
-    }
-    onSave(version.trim(), description.trim())
+    onSave(description.trim())
   }
 
   return (
@@ -58,24 +53,18 @@ export function CheckInModal({
         <DialogHeader>
           <DialogTitle>Check In</DialogTitle>
           <DialogDescription>
-            새 버전명을 입력하고 Save를 누르면 편집 내용이 저장됩니다.
+            버전은 서버가 `YY.MM.DD.0000` 형식으로 자동 생성합니다.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="checkin-version" className="text-xs font-semibold text-[#1E3D33]">
-              Version <span className="text-[#C5534B]">*</span>
+            <label className="text-xs font-semibold text-[#1E3D33]">
+              Version
             </label>
-            <input
-              id="checkin-version"
-              type="text"
-              value={version}
-              onChange={(e) => setVersion(e.target.value)}
-              placeholder="예: v1.2.3"
-              disabled={isPending}
-              className="h-9 rounded-lg border border-[#97A8A1] bg-white px-3 text-xs text-[#1E3D33] placeholder-[#8A8A8A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30 disabled:cursor-not-allowed disabled:bg-[#F5F8F6]"
-            />
+            <div className="rounded-lg border border-[#D7E1DB] bg-[#F5F8F6] px-3 py-2 text-xs text-[#51605A]">
+              저장 시 자동 생성됩니다. 예: 25.03.12.0000
+            </div>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -114,7 +103,7 @@ export function CheckInModal({
             type="button"
             className="h-9 rounded-full bg-[#1C7F59] px-4 text-xs font-semibold text-white hover:bg-[#166749]"
             onClick={handleSave}
-            disabled={isPending || !version.trim()}
+            disabled={isPending}
           >
             {isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
             Save

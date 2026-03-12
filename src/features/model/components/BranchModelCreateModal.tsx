@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,6 +10,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import type { ModelInfo } from '../types/model.types'
 
 const MAX_MODEL_NAME_LENGTH = 1000
@@ -17,11 +24,13 @@ const MAX_MODEL_NAME_LENGTH = 1000
 interface BranchModelCreateModalProps {
   open: boolean
   parentModel: ModelInfo | null
+  sourceVersions: ModelInfo[]
+  defaultSourceModelVersionKey: number | null
   currentUserId: string | null
   isPending: boolean
   errorMessage: string | null
   onOpenChange: (open: boolean) => void
-  onSubmit: (request: { suffix: string }) => void | Promise<void>
+  onSubmit: (request: { suffix: string; sourceModelVersionKey: number }) => void | Promise<void>
 }
 
 /**
@@ -31,6 +40,8 @@ interface BranchModelCreateModalProps {
 export function BranchModelCreateModal({
   open,
   parentModel,
+  sourceVersions,
+  defaultSourceModelVersionKey,
   currentUserId,
   isPending,
   errorMessage,
@@ -38,10 +49,33 @@ export function BranchModelCreateModal({
   onSubmit,
 }: BranchModelCreateModalProps) {
   const [suffix, setSuffix] = useState('')
+  const [selectedSourceModelVersionKey, setSelectedSourceModelVersionKey] = useState('')
   const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null)
   const normalizedParentModelName = parentModel?.modelName ?? '-'
   const normalizedCurrentUserId = currentUserId?.trim() ?? ''
   const normalizedSuffix = suffix.trim()
+  const resolvedDefaultSourceModelVersionKey =
+    defaultSourceModelVersionKey ?? sourceVersions[0]?.modelVersionKey ?? null
+
+  const selectedSourceModel = useMemo(
+    () =>
+      sourceVersions.find(
+        (version) => String(version.modelVersionKey) === selectedSourceModelVersionKey,
+      ) ?? null,
+    [selectedSourceModelVersionKey, sourceVersions],
+  )
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    setSuffix('')
+    setFormErrorMessage(null)
+    setSelectedSourceModelVersionKey(
+      resolvedDefaultSourceModelVersionKey ? String(resolvedDefaultSourceModelVersionKey) : '',
+    )
+  }, [open, resolvedDefaultSourceModelVersionKey])
 
   const previewModelName = useMemo(() => {
     const normalizedUserId = normalizedCurrentUserId || '{userId}'
@@ -77,13 +111,19 @@ export function BranchModelCreateModal({
       return
     }
 
+    const normalizedSourceModelVersionKey = Number(selectedSourceModelVersionKey)
+    if (!Number.isInteger(normalizedSourceModelVersionKey) || normalizedSourceModelVersionKey <= 0) {
+      setFormErrorMessage('복제할 버전을 선택해 주세요.')
+      return
+    }
+
     if (isModelNameTooLong) {
       setFormErrorMessage('최종 Model Name이 1000자를 초과했습니다. suffix를 줄여 주세요.')
       return
     }
 
     setFormErrorMessage(null)
-    await onSubmit({ suffix: normalizedSuffix })
+    await onSubmit({ suffix: normalizedSuffix, sourceModelVersionKey: normalizedSourceModelVersionKey })
   }
 
   return (
@@ -99,7 +139,7 @@ export function BranchModelCreateModal({
         <DialogHeader>
           <DialogTitle>Branch Model Create</DialogTitle>
           <DialogDescription>
-            선택한 root model의 최신 버전을 복제해 branch `EDIT/DEVELOP` 모델을 생성합니다.
+            선택한 root model의 버전을 복제해 branch `EDIT/DEVELOP` 모델을 생성합니다.
           </DialogDescription>
         </DialogHeader>
 
@@ -118,6 +158,38 @@ export function BranchModelCreateModal({
                   <label className="text-xs font-semibold text-[#1E3D33]">Current User</label>
                   <div className="flex h-11 items-center rounded-xl border border-[#E4EAE6] bg-[#F4F7F5] px-3 text-sm text-[#51605A]">
                     {currentUserId ?? '사용자 정보 확인 중'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-[#1E3D33]">
+                    Source Version
+                    <span className="ml-1 text-[#C5534B]">*</span>
+                  </label>
+                  <Select
+                    value={selectedSourceModelVersionKey || undefined}
+                    onValueChange={setSelectedSourceModelVersionKey}
+                    disabled={isPending || sourceVersions.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="복제할 버전을 선택해 주세요." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sourceVersions.map((version) => (
+                        <SelectItem key={version.modelVersionKey} value={String(version.modelVersionKey)}>
+                          {`${version.modelVersion} (${version.status})`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-[#1E3D33]">Source Description</label>
+                  <div className="min-h-11 rounded-xl border border-[#E4EAE6] bg-[#F4F7F5] px-3 py-3 text-sm text-[#51605A]">
+                    {selectedSourceModel?.description?.trim() || '설명 없음'}
                   </div>
                 </div>
               </div>
@@ -174,7 +246,12 @@ export function BranchModelCreateModal({
           </Button>
           <Button
             onClick={() => void handleSubmit()}
-            disabled={isPending || !normalizedCurrentUserId || isModelNameTooLong}
+            disabled={
+              isPending ||
+              !normalizedCurrentUserId ||
+              isModelNameTooLong ||
+              !selectedSourceModelVersionKey
+            }
           >
             {isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
             Create
