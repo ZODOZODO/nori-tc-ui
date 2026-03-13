@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -48,14 +48,17 @@ export function BranchModelCreateModal({
   onOpenChange,
   onSubmit,
 }: BranchModelCreateModalProps) {
+  const resolvedDefaultSourceModelVersionKey =
+    defaultSourceModelVersionKey ?? sourceVersions[0]?.modelVersionKey ?? null
   const [suffix, setSuffix] = useState('')
-  const [selectedSourceModelVersionKey, setSelectedSourceModelVersionKey] = useState('')
+  const [selectedSourceModelVersionKey, setSelectedSourceModelVersionKey] = useState(
+    () =>
+      resolvedDefaultSourceModelVersionKey ? String(resolvedDefaultSourceModelVersionKey) : '',
+  )
   const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null)
   const normalizedParentModelName = parentModel?.modelName ?? '-'
   const normalizedCurrentUserId = currentUserId?.trim() ?? ''
   const normalizedSuffix = suffix.trim()
-  const resolvedDefaultSourceModelVersionKey =
-    defaultSourceModelVersionKey ?? sourceVersions[0]?.modelVersionKey ?? null
 
   const selectedSourceModel = useMemo(
     () =>
@@ -64,18 +67,6 @@ export function BranchModelCreateModal({
       ) ?? null,
     [selectedSourceModelVersionKey, sourceVersions],
   )
-
-  useEffect(() => {
-    if (!open) {
-      return
-    }
-
-    setSuffix('')
-    setFormErrorMessage(null)
-    setSelectedSourceModelVersionKey(
-      resolvedDefaultSourceModelVersionKey ? String(resolvedDefaultSourceModelVersionKey) : '',
-    )
-  }, [open, resolvedDefaultSourceModelVersionKey])
 
   const previewModelName = useMemo(() => {
     const normalizedUserId = normalizedCurrentUserId || '{userId}'
@@ -155,15 +146,6 @@ export function BranchModelCreateModal({
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-[#1E3D33]">Current User</label>
-                  <div className="flex h-11 items-center rounded-xl border border-[#E4EAE6] bg-[#F4F7F5] px-3 text-sm text-[#51605A]">
-                    {currentUserId ?? '사용자 정보 확인 중'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-semibold text-[#1E3D33]">
                     Source Version
                     <span className="ml-1 text-[#C5534B]">*</span>
@@ -185,12 +167,12 @@ export function BranchModelCreateModal({
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-[#1E3D33]">Source Description</label>
-                  <div className="min-h-11 rounded-xl border border-[#E4EAE6] bg-[#F4F7F5] px-3 py-3 text-sm text-[#51605A]">
-                    {selectedSourceModel?.description?.trim() || '설명 없음'}
-                  </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-[#1E3D33]">Source Description</label>
+                <div className="min-h-11 rounded-xl border border-[#E4EAE6] bg-[#F4F7F5] px-3 py-3 text-sm text-[#51605A]">
+                  {selectedSourceModel?.description?.trim() || '설명 없음'}
                 </div>
               </div>
 

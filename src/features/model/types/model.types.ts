@@ -116,7 +116,9 @@ export type ModelDeleteBatchResponse = ApiResponse<ModelDeleteBatchResult>
  * 모델 상세 노드 row 원본 payload 타입입니다.
  */
 export interface ModelDetailRowPayload {
+  id?: string | null
   values: Array<string | null>
+  previewValues?: Array<string | null>
 }
 
 /**
@@ -172,6 +174,7 @@ export interface ModelOpenedTab {
 export interface ModelDetailRow {
   id: string
   values: string[]
+  previewValues: string[]
 }
 
 /**

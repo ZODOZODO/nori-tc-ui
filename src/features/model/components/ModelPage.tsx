@@ -8,6 +8,7 @@ import { UserProfileModal } from '@/features/profile/components/UserProfileModal
 import { useMe } from '@/features/profile/hooks/useProfile'
 import { ResizableDivider } from '@/features/eqp/components/ResizableDivider'
 import { useModelDetail } from '../hooks/useModelDetail'
+import { useModelDetailMutations } from '../hooks/useModelDetailMutations'
 import { useModelList } from '../hooks/useModelList'
 import { useModelManagementMutations } from '../hooks/useModelManagementMutations'
 import { useModelNodeDetail } from '../hooks/useModelNodeDetail'
@@ -99,6 +100,12 @@ const resolveDetailNodesByInterface = (commInterface: ProtocolType): ModelDetail
 }
 
 /**
+ * 신규 상세 row에 사용할 임시 식별자입니다.
+ */
+const createEditableDetailRowId = (): string =>
+  `detail-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
+/**
  * 상태 문자열이 DEPRECATED인지 확인합니다.
  */
 const isDeprecatedStatus = (status: string): boolean =>
@@ -174,6 +181,7 @@ export function ModelPage() {
   const meQuery = useMe(true)
 
   const { deleteModelMutation, checkoutModelMutation, checkinModelMutation } = useModelMutations()
+  const { saveDetailRowsMutation, uploadMdfMutation } = useModelDetailMutations()
   const {
     createRootModelMutation,
     updateRootModelInfoMutation,
@@ -526,10 +534,97 @@ export function ModelPage() {
               values: row.values.map((cellValue, index) =>
                 index === columnIndex ? nextValue : cellValue,
               ),
+              previewValues: row.previewValues.map((cellValue, index) =>
+                index === columnIndex ? '' : cellValue,
+              ),
             }
           : row,
       ),
     }))
+  }
+
+  const handleAddDetailRow = useCallback(() => {
+    if (!detailContextKey || detailColumns.length === 0) {
+      return
+    }
+
+    setDetailRowsByContext((previousRowsByContext) => ({
+      ...previousRowsByContext,
+      [detailContextKey]: [
+        ...(previousRowsByContext[detailContextKey] ?? []),
+        {
+          id: createEditableDetailRowId(),
+          values: detailColumns.map(() => ''),
+          previewValues: detailColumns.map(() => ''),
+        },
+      ],
+    }))
+    setCheckInErrorMessage(null)
+  }, [detailColumns, detailContextKey])
+
+  const handleDeleteDetailRow = useCallback((rowId: string) => {
+    if (!detailContextKey) {
+      return
+    }
+
+    setDetailRowsByContext((previousRowsByContext) => ({
+      ...previousRowsByContext,
+      [detailContextKey]: (previousRowsByContext[detailContextKey] ?? []).filter(
+        (row) => row.id !== rowId,
+      ),
+    }))
+    setCheckInErrorMessage(null)
+  }, [detailContextKey])
+
+  const handleSaveDetailRows = async () => {
+    if (!activeTabModel || !detailNode || detailNode === 'mdf') {
+      return
+    }
+
+    try {
+      setCheckInErrorMessage(null)
+      const savedDetail = await saveDetailRowsMutation.mutateAsync({
+        modelVersionKey: activeTabModel.modelVersionKey,
+        detailNode,
+        rows: detailRows,
+      })
+
+      if (!detailContextKey) {
+        return
+      }
+
+      setDetailColumnsByContext((previousColumnsByContext) => ({
+        ...previousColumnsByContext,
+        [detailContextKey]: savedDetail.columns,
+      }))
+      setDetailRowsByContext((previousRowsByContext) => ({
+        ...previousRowsByContext,
+        [detailContextKey]: savedDetail.rows,
+      }))
+    } catch (error) {
+      setCheckInErrorMessage(resolveErrorMessage(error, '상세 데이터를 저장하지 못했습니다.'))
+    }
+  }
+
+  const handleUploadMdf = async (file: File) => {
+    if (!activeTabModel || !detailContextKey) {
+      return
+    }
+
+    try {
+      setCheckInErrorMessage(null)
+      const savedMdf = await uploadMdfMutation.mutateAsync({
+        modelVersionKey: activeTabModel.modelVersionKey,
+        file,
+      })
+
+      setDetailMdfByContext((previousMdfByContext) => ({
+        ...previousMdfByContext,
+        [detailContextKey]: [savedMdf],
+      }))
+    } catch (error) {
+      setCheckInErrorMessage(resolveErrorMessage(error, 'MDF 업로드에 실패했습니다.'))
+    }
   }
 
   /**
@@ -1180,11 +1275,18 @@ export function ModelPage() {
                     lockOwner={lockOwner}
                     isCheckoutPending={checkoutModelMutation.isPending}
                     isCheckinPending={checkinModelMutation.isPending}
+                    isDetailSavePending={saveDetailRowsMutation.isPending}
+                    isMdfUploadPending={uploadMdfMutation.isPending}
                     actionErrorMessage={checkInErrorMessage}
                     onSelectTab={handleSelectTab}
                     onCloseTab={handleCloseTab}
                     onSelectDetailNode={setDetailNode}
                     onChangeDetailValue={handleDetailValueChange}
+                    onAddDetailRow={handleAddDetailRow}
+                    onDeleteDetailRow={handleDeleteDetailRow}
+                    onSaveDetailRows={() => void handleSaveDetailRows()}
+                    onUndo={() => void handleUndoCheckIn()}
+                    onUploadMdf={(file) => void handleUploadMdf(file)}
                     onCheckOut={() => void handleCheckOut()}
                     onRequestCheckIn={handleRequestCheckIn}
                   />

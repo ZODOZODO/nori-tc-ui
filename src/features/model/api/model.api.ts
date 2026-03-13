@@ -1,6 +1,7 @@
 import { isAxiosError } from 'axios'
 import { apiClient } from '@/shared/lib/api-client'
 import {
+  type ApiResponse,
   createModelFailResponse,
   DEFAULT_MODEL_ERROR_MESSAGE,
   ModelApiError,
@@ -205,7 +206,13 @@ const normalizeModelListPayload = (
 const isDetailRowPayload = (value: unknown): value is ModelDetailRowPayload =>
   isRecord(value) &&
   Array.isArray(value.values) &&
-  value.values.every((cellValue) => typeof cellValue === 'string' || cellValue === null)
+  value.values.every((cellValue) => typeof cellValue === 'string' || cellValue === null) &&
+  (value.id === undefined || value.id === null || typeof value.id === 'string') &&
+  (value.previewValues === undefined ||
+    (Array.isArray(value.previewValues) &&
+      value.previewValues.every(
+        (cellValue) => typeof cellValue === 'string' || cellValue === null,
+      )))
 
 /**
  * MDF payload 최소 계약을 검사합니다.
@@ -243,8 +250,13 @@ const normalizeModelNodeDetailPayload = (
     : []
 
   const rows: ModelDetailRow[] = rawRows.map((row, index) => ({
-    id: `${node}-${index}`,
+    id:
+      typeof row.id === 'string' && row.id.trim().length > 0 ? row.id : `${node}-${index}`,
     values: row.values.map((cellValue) => cellValue ?? ''),
+    previewValues:
+      Array.isArray(row.previewValues) && row.previewValues.length === row.values.length
+        ? row.previewValues.map((cellValue) => cellValue ?? '')
+        : row.values.map((cellValue) => cellValue ?? ''),
   }))
 
   const mdfContents: ModelMdfContent[] = rawMdfContents.map((mdf, index) => ({
@@ -332,6 +344,144 @@ export const modelApi = {
       return normalizeModelNodeDetailPayload(successPayload, node)
     } catch (error) {
       throw normalizeModelError(error, MODEL_DETAIL_NODE_FALLBACK_MESSAGE)
+    }
+  },
+
+  /**
+   * branch version을 EDIT version으로 checkout합니다.
+   */
+  checkoutModelVersion: async (modelVersionKey: number): Promise<ModelInfo> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.post<ModelManagementResponse>(`/model/${modelVersionKey}/checkout`, null, {
+          withCredentials: true,
+          headers: {
+            [CSRF_HEADER_NAME]: csrfToken,
+          },
+          validateStatus: (status) => status >= 200 && status < 600,
+        }),
+      )
+
+      return resolveSuccessPayload<ModelInfo>(
+        response.data,
+        response.status,
+        '모델 checkout에 실패했습니다.',
+      )
+    } catch (error) {
+      throw normalizeModelError(error, '모델 checkout에 실패했습니다.')
+    }
+  },
+
+  /**
+   * EDIT version을 새 branch version으로 checkin합니다.
+   */
+  checkinModelVersion: async (
+    modelVersionKey: number,
+    request: { newVersion: string; description: string },
+  ): Promise<ModelInfo> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.post<ModelManagementResponse>(`/model/${modelVersionKey}/checkin`, request, {
+          withCredentials: true,
+          headers: {
+            [CSRF_HEADER_NAME]: csrfToken,
+          },
+          validateStatus: (status) => status >= 200 && status < 600,
+        }),
+      )
+
+      return resolveSuccessPayload<ModelInfo>(
+        response.data,
+        response.status,
+        '모델 checkin에 실패했습니다.',
+      )
+    } catch (error) {
+      throw normalizeModelError(error, '모델 checkin에 실패했습니다.')
+    }
+  },
+
+  /**
+   * 일반 상세 테이블 row를 저장합니다.
+   */
+  saveModelNodeDetailRows: async (
+    modelVersionKey: number,
+    node: ModelDetailNode,
+    rows: ModelDetailRow[],
+  ): Promise<ModelNodeDetailData> => {
+    try {
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.put<ModelNodeDetailResponse>(
+          `/model/${modelVersionKey}/details/${node}`,
+          {
+            rows: rows.map((row) => ({
+              id: row.id,
+              values: row.values,
+            })),
+          },
+          {
+            withCredentials: true,
+            headers: {
+              [CSRF_HEADER_NAME]: csrfToken,
+            },
+            validateStatus: (status) => status >= 200 && status < 600,
+          },
+        ),
+      )
+
+      const successPayload = resolveSuccessPayload<ModelNodeDetailPayload>(
+        response.data,
+        response.status,
+        '상세 데이터를 저장하지 못했습니다.',
+      )
+
+      return normalizeModelNodeDetailPayload(successPayload, node)
+    } catch (error) {
+      throw normalizeModelError(error, '상세 데이터를 저장하지 못했습니다.')
+    }
+  },
+
+  /**
+   * MDF XML 파일을 업로드합니다.
+   */
+  uploadModelMdf: async (
+    modelVersionKey: number,
+    file: File,
+    mdfName?: string,
+  ): Promise<ModelMdfContent> => {
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      if (mdfName && mdfName.trim().length > 0) {
+        formData.append('mdfName', mdfName.trim())
+      }
+
+      const response = await withCsrfHeaders((csrfToken) =>
+        apiClient.put<ApiResponse<ModelMdfContentPayload>>(
+          `/model/${modelVersionKey}/details/mdf`,
+          formData,
+          {
+            withCredentials: true,
+            headers: {
+              [CSRF_HEADER_NAME]: csrfToken,
+            },
+            validateStatus: (status) => status >= 200 && status < 600,
+          },
+        ),
+      )
+
+      const successPayload = resolveSuccessPayload<ModelMdfContentPayload>(
+        response.data,
+        response.status,
+        'MDF 업로드에 실패했습니다.',
+      )
+
+      return {
+        id: 'mdf-0',
+        name: successPayload.name,
+        xml: successPayload.xml,
+      }
+    } catch (error) {
+      throw normalizeModelError(error, 'MDF 업로드에 실패했습니다.')
     }
   },
 

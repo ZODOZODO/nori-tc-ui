@@ -61,21 +61,6 @@ const resolveLockOwner = (model: ModelInfo): string | null => {
 }
 
 /**
- * 저장/수정 요청에 사용할 감사 사용자 ID를 정규화합니다.
- */
-const resolveAuditUser = (currentUserId: string | null, fallbackUser: string | null | undefined): string => {
-  if (currentUserId && currentUserId.trim().length > 0) {
-    return currentUserId.trim()
-  }
-
-  if (fallbackUser && fallbackUser.trim().length > 0) {
-    return fallbackUser.trim()
-  }
-
-  return 'SYSTEM'
-}
-
-/**
  * 다른 사용자가 EDIT 잠금을 점유한 경우를 표현하는 전용 에러를 생성합니다.
  */
 const createCheckoutConflictError = (owner: string | null): ModelApiError =>
@@ -95,8 +80,8 @@ const createCheckoutConflictError = (owner: string | null): ModelApiError =>
  * Model 관련 mutation 훅 모음입니다.
  *
  * 체크아웃/체크인은 현재 백엔드 CRUD 계약을 조합해 동작합니다.
- * - checkout: 동일 modelKey의 EDIT 버전이 없으면 EDIT 버전을 생성
- * - checkin: 신규 버전 생성 후 EDIT 버전을 삭제
+ * - checkout: 동일 modelKey의 EDIT 버전이 없으면 현재 상세 스냅샷을 복제한 EDIT 버전을 생성
+ * - checkin: EDIT 상세 스냅샷을 새 버전으로 복제한 뒤 EDIT 버전을 삭제
  */
 export function useModelMutations() {
   const queryClient = useQueryClient()
@@ -151,19 +136,8 @@ export function useModelMutations() {
         return existingEditModel
       }
 
-      const auditUser = resolveAuditUser(currentUserId, model.updatedBy)
-
       try {
-        return await modelApi.createModel({
-          modelName: model.modelName,
-          modelVersion: EDIT_MODEL_VERSION,
-          commInterface: model.commInterface,
-          status: model.status,
-          description: model.description,
-          maker: model.maker,
-          createdBy: auditUser,
-          updatedBy: auditUser,
-        })
+        return await modelApi.checkoutModelVersion(model.modelVersionKey)
       } catch (error) {
         if (error instanceof ModelApiError && error.status === 409) {
           const latestModelItems = await refreshModelItems()
@@ -212,26 +186,10 @@ export function useModelMutations() {
       ) {
         throw createCheckoutConflictError(lockOwner)
       }
-
-      const auditUser = resolveAuditUser(currentUserId, editModel.updatedBy)
-
-      const createdModel = await modelApi.createModel({
-        modelName: editModel.modelName,
-        modelVersion: normalizedVersion,
-        commInterface: editModel.commInterface,
-        status: editModel.status,
+      return modelApi.checkinModelVersion(editModel.modelVersionKey, {
+        newVersion: normalizedVersion,
         description: description.trim(),
-        maker: editModel.maker,
-        createdBy: auditUser,
-        updatedBy: auditUser,
       })
-
-      // 체크인 완료 후 EDIT 버전을 삭제해 잠금을 해제합니다.
-      if (isEditVersion(editModel.modelVersion)) {
-        await modelApi.deleteModel(editModel.modelVersionKey)
-      }
-
-      return createdModel
     },
     onSuccess: async (createdModel, variables) => {
       await invalidateModelTreeQueries(queryClient)
