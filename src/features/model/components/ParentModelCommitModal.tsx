@@ -173,8 +173,8 @@ export function ParentModelCommitModal({
         }
       }}
     >
-      <DialogContent className="max-h-[88vh] max-w-[1040px] overflow-hidden p-0">
-        <div className="flex max-h-[88vh] flex-col">
+      <DialogContent className="max-h-[92vh] w-[96vw] max-w-[1480px] overflow-hidden p-0">
+        <div className="flex min-h-0 max-h-[92vh] flex-col">
           <DialogHeader className="border-b border-[#EEF3F0] px-6 py-5">
             <DialogTitle>Parent Model Commit</DialogTitle>
             <DialogDescription>
@@ -182,8 +182,8 @@ export function ParentModelCommitModal({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-            <section className="grid gap-3 md:grid-cols-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
+            <section className="grid gap-3 xl:grid-cols-4 md:grid-cols-2">
               <div className="rounded-xl border border-[#E4EAE6] bg-[#FAFCFB] px-3 py-3">
                 <p className="text-[11px] font-semibold text-[#738078]">Branch Model</p>
                 <p className="mt-1 text-sm font-semibold text-[#22322B]">
@@ -314,8 +314,12 @@ export function ParentModelCommitModal({
             </section>
           </div>
 
-          <DialogFooter className="border-t border-[#EEF3F0] px-6 py-4">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPreviewLoading || isCommitPending}>
+          <DialogFooter className="shrink-0 border-t border-[#EEF3F0] px-6 py-4">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isPreviewLoading || isCommitPending}
+            >
               Cancel
             </Button>
             <Button onClick={() => void handleCommit()} disabled={isPreviewLoading || isCommitPending}>

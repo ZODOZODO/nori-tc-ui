@@ -10,6 +10,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
@@ -17,17 +24,24 @@ import {
   buildWorkflowFilterValue,
   createEmptyActionDataIndexField,
   createEmptyWorkflowFilterCondition,
+  createEmptyWorkflowGroup,
+  createTransformDraft,
+  LOOKUP_SOURCE_OPTIONS,
   parseActionDataIndexEditor,
   parseWorkflowFilterEditor,
   summarizeActionDataIndexValue,
   summarizeWorkflowFilterValue,
   type ActionDataIndexEditorDraft,
   type ActionDataIndexFieldDraft,
-  type ModelVariableSource,
-  type WorkflowFilterConditionDraft,
+  type TransformDraft,
+  type WorkflowComparison,
   type WorkflowFilterEditorDraft,
-  type WorkflowFilterOperator,
+  type WorkflowGroupDraft,
+  type WorkflowLookupSource,
+  type WorkflowNodeDraft,
+  WORKFLOW_COMPARISON_OPTIONS,
 } from '../lib/model-detail-editor'
+import { extractMdfMessageOptions, type MdfMessageOption } from '../lib/mdf-message-parser'
 import {
   MODEL_DETAIL_NODE_LABELS,
   SECS_DETAIL_NODES,
@@ -40,21 +54,12 @@ import {
 } from '../types/model.types'
 
 const WORKFLOW_MODAL_EDITABLE_COLUMNS = new Set(['filter', 'data index'])
-const VARIABLE_SOURCE_OPTIONS: ModelVariableSource[] = ['AUTO', 'MSG', 'CTX']
-const FILTER_OPERATOR_OPTIONS: WorkflowFilterOperator[] = [
-  'eq',
-  'ne',
-  'gt',
-  'gte',
-  'lt',
-  'lte',
-  'contains',
-  'in',
-]
+const EMPTY_MDF_TEMPLATE_VALUE = '__empty__'
 
 interface WorkflowTextEditorState {
   rowId: string
   rowLabel: string
+  rowIndex: number
   columnIndex: number
   columnName: string
 }
@@ -67,6 +72,7 @@ interface ModelDetailPanelProps {
   detailColumns: string[]
   detailRows: ModelDetailRow[]
   mdfContents: ModelMdfContent[]
+  workflowMdfContents: ModelMdfContent[]
   isDetailLoading: boolean
   detailErrorMessage: string | null
   isEditMode: boolean
@@ -140,19 +146,393 @@ const resolveWorkflowPreviewValue = (row: ModelDetailRow, columnIndex: number, c
   return rawValue
 }
 
-const updateWorkflowFilterDraftRow = (
-  rows: WorkflowFilterConditionDraft[],
-  targetId: string,
-  patch: Partial<WorkflowFilterConditionDraft>,
-): WorkflowFilterConditionDraft[] =>
-  rows.map((row) => (row.id === targetId ? { ...row, ...patch } : row))
-
 const updateActionDataIndexDraftRow = (
   rows: ActionDataIndexFieldDraft[],
   targetId: string,
   patch: Partial<ActionDataIndexFieldDraft>,
 ): ActionDataIndexFieldDraft[] =>
   rows.map((row) => (row.id === targetId ? { ...row, ...patch } : row))
+
+const updateTransforms = (
+  transforms: TransformDraft[],
+  targetId: string,
+  patch: Partial<TransformDraft>,
+): TransformDraft[] =>
+  transforms.map((transform) =>
+    transform.id === targetId ? { ...transform, ...patch } : transform,
+  )
+
+const ensureGroupChildren = (children: WorkflowNodeDraft[]): WorkflowNodeDraft[] =>
+  children.length > 0 ? children : [createEmptyWorkflowFilterCondition()]
+
+const updateWorkflowNode = (
+  node: WorkflowNodeDraft,
+  targetId: string,
+  patcher: (targetNode: WorkflowNodeDraft) => WorkflowNodeDraft,
+): WorkflowNodeDraft => {
+  if (node.id === targetId) {
+    return patcher(node)
+  }
+
+  if (node.nodeType === 'condition') {
+    return node
+  }
+
+  return {
+    ...node,
+    children: node.children.map((child) => updateWorkflowNode(child, targetId, patcher)),
+  }
+}
+
+const addWorkflowChildNode = (
+  node: WorkflowNodeDraft,
+  groupId: string,
+  nextChild: WorkflowNodeDraft,
+): WorkflowNodeDraft => {
+  if (node.nodeType === 'condition') {
+    return node
+  }
+
+  if (node.id === groupId) {
+    return {
+      ...node,
+      children: [...node.children, nextChild],
+    }
+  }
+
+  return {
+    ...node,
+    children: node.children.map((child) => addWorkflowChildNode(child, groupId, nextChild)),
+  }
+}
+
+const removeWorkflowNode = (
+  rootGroup: WorkflowGroupDraft,
+  targetId: string,
+): WorkflowGroupDraft => {
+  const removeChildFromGroup = (group: WorkflowGroupDraft): WorkflowGroupDraft => {
+    const nextChildren = group.children.flatMap<WorkflowNodeDraft>((child) => {
+      if (child.id === targetId) {
+        return []
+      }
+
+      if (child.nodeType === 'group') {
+        return [removeChildFromGroup(child)]
+      }
+
+      return [child]
+    })
+
+    return {
+      ...group,
+      children: ensureGroupChildren(nextChildren),
+    }
+  }
+
+  if (rootGroup.id === targetId) {
+    return {
+      ...rootGroup,
+      children: [createEmptyWorkflowFilterCondition()],
+    }
+  }
+
+  return removeChildFromGroup(rootGroup)
+}
+
+const buildMdfMessageOptions = (
+  workflowMdfContents: ModelMdfContent[],
+  currentValue: string,
+): MdfMessageOption[] => {
+  const optionMap = new Map<string, MdfMessageOption>()
+  extractMdfMessageOptions(workflowMdfContents).forEach((option) => {
+    optionMap.set(option.messageName, option)
+  })
+
+  const normalizedCurrentValue = currentValue.trim()
+  if (normalizedCurrentValue && !optionMap.has(normalizedCurrentValue)) {
+    optionMap.set(normalizedCurrentValue, {
+      messageName: normalizedCurrentValue,
+      sourceName: '',
+      xmlSnippet: '',
+    })
+  }
+
+  return [...optionMap.values()]
+}
+
+interface WorkflowNodeEditorProps {
+  node: WorkflowNodeDraft
+  depth: number
+  onUpdateNode: (
+    targetId: string,
+    patcher: (targetNode: WorkflowNodeDraft) => WorkflowNodeDraft,
+  ) => void
+  onAddCondition: (groupId: string) => void
+  onAddGroup: (groupId: string) => void
+  onRemoveNode: (nodeId: string) => void
+}
+
+function WorkflowNodeEditor({
+  node,
+  depth,
+  onUpdateNode,
+  onAddCondition,
+  onAddGroup,
+  onRemoveNode,
+}: WorkflowNodeEditorProps) {
+  if (node.nodeType === 'condition') {
+    return (
+      <div
+        className="rounded-2xl border border-[#DCE5E0] bg-white p-4 shadow-[0_1px_2px_rgba(20,46,36,0.04)]"
+        style={{ marginLeft: `${depth * 16}px` }}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-xs font-semibold text-[#1E3D33]">Condition</p>
+            <p className="text-[11px] text-[#738078]">
+              `from`, `path`, `comparison`, `expected`, `transforms`를 직접 편집합니다.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="size-8 rounded-lg text-[#6A7971] hover:bg-[#F3F7F5] hover:text-[#C5534B]"
+            onClick={() => onRemoveNode(node.id)}
+            aria-label="조건 삭제"
+          >
+            <Trash2 className="size-4" aria-hidden="true" />
+          </Button>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[#1E3D33]">from</label>
+            <select
+              value={node.from}
+              onChange={(event) =>
+                onUpdateNode(node.id, (targetNode) =>
+                  targetNode.nodeType === 'condition'
+                    ? {
+                        ...targetNode,
+                        from: event.target.value as WorkflowLookupSource,
+                      }
+                    : targetNode,
+                )
+              }
+              className="h-9 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+            >
+              {LOOKUP_SOURCE_OPTIONS.map((source) => (
+                <option key={source} value={source}>
+                  {source}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[#1E3D33]">path</label>
+            <Input
+              value={node.path}
+              onChange={(event) =>
+                onUpdateNode(node.id, (targetNode) =>
+                  targetNode.nodeType === 'condition'
+                    ? {
+                        ...targetNode,
+                        path: event.target.value,
+                      }
+                    : targetNode,
+                )
+              }
+              placeholder="status"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[#1E3D33]">comparison</label>
+            <select
+              value={node.comparison}
+              onChange={(event) =>
+                onUpdateNode(node.id, (targetNode) =>
+                  targetNode.nodeType === 'condition'
+                    ? {
+                        ...targetNode,
+                        comparison: event.target.value as WorkflowComparison,
+                      }
+                    : targetNode,
+                )
+              }
+              className="h-9 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+            >
+              {WORKFLOW_COMPARISON_OPTIONS.map((comparison) => (
+                <option key={comparison} value={comparison}>
+                  {comparison}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[#1E3D33]">expected</label>
+            <Input
+              value={node.expectedText}
+              onChange={(event) =>
+                onUpdateNode(node.id, (targetNode) =>
+                  targetNode.nodeType === 'condition'
+                    ? {
+                        ...targetNode,
+                        expectedText: event.target.value,
+                      }
+                    : targetNode,
+                )
+              }
+              placeholder='예: "PASS", 4, true, ["A", "B"]'
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-2 rounded-xl border border-[#E7EEEA] bg-[#FAFCFB] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold text-[#1E3D33]">transforms</p>
+              <p className="text-[11px] text-[#738078]">
+                순차 적용할 transform을 한 줄씩 추가합니다.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                onUpdateNode(node.id, (targetNode) =>
+                  targetNode.nodeType === 'condition'
+                    ? {
+                        ...targetNode,
+                        transforms: [...targetNode.transforms, createTransformDraft()],
+                      }
+                    : targetNode,
+                )
+              }
+            >
+              <Plus className="size-3.5" aria-hidden="true" />
+              transform 추가
+            </Button>
+          </div>
+
+          {node.transforms.length === 0 ? (
+            <p className="text-[11px] text-[#97A39C]">transform이 없으면 원본 값을 그대로 비교합니다.</p>
+          ) : (
+            <div className="space-y-2">
+              {node.transforms.map((transform) => (
+                <div key={transform.id} className="flex items-center gap-2">
+                  <Input
+                    value={transform.value}
+                    onChange={(event) =>
+                      onUpdateNode(node.id, (targetNode) =>
+                        targetNode.nodeType === 'condition'
+                          ? {
+                              ...targetNode,
+                              transforms: updateTransforms(targetNode.transforms, transform.id, {
+                                value: event.target.value,
+                              }),
+                            }
+                          : targetNode,
+                      )
+                    }
+                    placeholder="trim"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-8 rounded-lg text-[#6A7971] hover:bg-[#F3F7F5] hover:text-[#C5534B]"
+                    onClick={() =>
+                      onUpdateNode(node.id, (targetNode) =>
+                        targetNode.nodeType === 'condition'
+                          ? {
+                              ...targetNode,
+                              transforms: targetNode.transforms.filter(
+                                (item) => item.id !== transform.id,
+                              ),
+                            }
+                          : targetNode,
+                      )
+                    }
+                    aria-label="transform 삭제"
+                  >
+                    <Trash2 className="size-4" aria-hidden="true" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="rounded-2xl border border-[#D6E4DD] bg-[#F8FBF9] p-4"
+      style={{ marginLeft: `${depth * 16}px` }}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold text-[#1E3D33]">Group</p>
+          <p className="text-[11px] text-[#738078]">
+            하위 조건을 `{node.groupType}` 기준으로 묶습니다.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={node.groupType}
+            onChange={(event) =>
+              onUpdateNode(node.id, (targetNode) =>
+                targetNode.nodeType === 'group'
+                  ? {
+                      ...targetNode,
+                      groupType: event.target.value as WorkflowGroupDraft['groupType'],
+                    }
+                  : targetNode,
+              )
+            }
+            className="h-9 rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+          >
+            <option value="and">and</option>
+            <option value="or">or</option>
+          </select>
+          <Button type="button" variant="outline" size="sm" onClick={() => onAddCondition(node.id)}>
+            <Plus className="size-3.5" aria-hidden="true" />
+            조건 추가
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => onAddGroup(node.id)}>
+            <Plus className="size-3.5" aria-hidden="true" />
+            그룹 추가
+          </Button>
+          {depth > 0 ? (
+            <Button type="button" variant="ghost" size="icon-sm" onClick={() => onRemoveNode(node.id)}>
+              <Trash2 className="size-4" aria-hidden="true" />
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {node.children.map((childNode) => (
+          <WorkflowNodeEditor
+            key={childNode.id}
+            node={childNode}
+            depth={depth + 1}
+            onUpdateNode={onUpdateNode}
+            onAddCondition={onAddCondition}
+            onAddGroup={onAddGroup}
+            onRemoveNode={onRemoveNode}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
 
 /**
  * Model Version 상세 패널입니다.
@@ -165,6 +545,7 @@ export function ModelDetailPanel({
   detailColumns,
   detailRows,
   mdfContents,
+  workflowMdfContents,
   isDetailLoading,
   detailErrorMessage,
   isEditMode,
@@ -245,7 +626,76 @@ export function ModelDetailPanel({
     return `${workflowTextEditor.rowLabel} / ${workflowTextEditor.columnName}`
   }, [workflowTextEditor])
 
-  const handleOpenWorkflowTextEditor = (row: ModelDetailRow, columnIndex: number) => {
+  const workflowEditorErrorMessage = useMemo(() => {
+    if (!workflowTextEditor || !actionErrorMessage) {
+      return null
+    }
+
+    const normalizedMessage = actionErrorMessage.trim()
+    if (!normalizedMessage.startsWith('workflow ')) {
+      return normalizedMessage
+    }
+
+    const rowPrefix = `workflow ${workflowTextEditor.rowIndex + 1}행`
+    return normalizedMessage.startsWith(rowPrefix) ? normalizedMessage : null
+  }, [actionErrorMessage, workflowTextEditor])
+
+  const workflowMdfMessageOptions = useMemo(
+    () => buildMdfMessageOptions(workflowMdfContents, actionDataIndexDraft.mdfTemplateName),
+    [actionDataIndexDraft.mdfTemplateName, workflowMdfContents],
+  )
+  const selectedWorkflowMdfMessage = useMemo(
+    () =>
+      workflowMdfMessageOptions.find(
+        (option) => option.messageName === actionDataIndexDraft.mdfTemplateName.trim(),
+      ) ?? null,
+    [actionDataIndexDraft.mdfTemplateName, workflowMdfMessageOptions],
+  )
+
+  const handleUpdateWorkflowNode = (
+    targetId: string,
+    patcher: (targetNode: WorkflowNodeDraft) => WorkflowNodeDraft,
+  ) => {
+    setWorkflowFilterDraft((previousDraft) => ({
+      ...previousDraft,
+      rootGroup: updateWorkflowNode(previousDraft.rootGroup, targetId, patcher) as WorkflowGroupDraft,
+    }))
+  }
+
+  const handleAddWorkflowCondition = (groupId: string) => {
+    setWorkflowFilterDraft((previousDraft) => ({
+      ...previousDraft,
+      rootGroup: addWorkflowChildNode(
+        previousDraft.rootGroup,
+        groupId,
+        createEmptyWorkflowFilterCondition(),
+      ) as WorkflowGroupDraft,
+    }))
+  }
+
+  const handleAddWorkflowGroup = (groupId: string) => {
+    setWorkflowFilterDraft((previousDraft) => ({
+      ...previousDraft,
+      rootGroup: addWorkflowChildNode(
+        previousDraft.rootGroup,
+        groupId,
+        createEmptyWorkflowGroup('and'),
+      ) as WorkflowGroupDraft,
+    }))
+  }
+
+  const handleRemoveWorkflowNode = (nodeId: string) => {
+    setWorkflowFilterDraft((previousDraft) => ({
+      ...previousDraft,
+      rootGroup: removeWorkflowNode(previousDraft.rootGroup, nodeId),
+    }))
+  }
+
+  const handleOpenWorkflowTextEditor = (
+    row: ModelDetailRow,
+    rowIndex: number,
+    columnIndex: number,
+  ) => {
     const columnName = normalizedDetailColumns[columnIndex]
     if (!isWorkflowModalEditableColumn(normalizedDetailNode, columnName) || isReadOnly) {
       return
@@ -255,6 +705,7 @@ export function ModelDetailPanel({
     setWorkflowTextEditor({
       rowId: row.id,
       rowLabel: row.values[0] ?? '',
+      rowIndex,
       columnIndex,
       columnName,
     })
@@ -553,7 +1004,7 @@ export function ModelDetailPanel({
                           </TableCell>
                         </TableRow>
                       ) : (
-                        detailRows.map((row) => (
+                        detailRows.map((row, rowIndex) => (
                           <TableRow key={row.id}>
                             {normalizedDetailColumns.map((columnName, columnIndex) => {
                               const rawValue = row.values[columnIndex] ?? ''
@@ -583,7 +1034,7 @@ export function ModelDetailPanel({
                                     <div
                                       className="group flex min-h-8 items-center gap-2 rounded-md border border-[#DCE5E0] bg-white px-2 py-1.5"
                                       onDoubleClick={() =>
-                                        handleOpenWorkflowTextEditor(row, columnIndex)
+                                        handleOpenWorkflowTextEditor(row, rowIndex, columnIndex)
                                       }
                                     >
                                       <span
@@ -598,7 +1049,7 @@ export function ModelDetailPanel({
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          handleOpenWorkflowTextEditor(row, columnIndex)
+                                          handleOpenWorkflowTextEditor(row, rowIndex, columnIndex)
                                         }
                                         className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-transparent text-[#5B6962] transition hover:border-[#DCE5E0] hover:bg-[#F3F7F5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
                                         aria-label={`${row.values[0] ?? 'workflow'} ${columnName} 편집`}
@@ -653,350 +1104,334 @@ export function ModelDetailPanel({
           }
         }}
       >
-        <DialogContent className="max-w-5xl">
+        <DialogContent className="max-w-6xl">
           <DialogHeader>
             <DialogTitle>{workflowEditorTitle || 'Workflow 편집'}</DialogTitle>
             <DialogDescription>
               {isFilterColumn(workflowTextEditor?.columnName)
-                ? 'workflow_filter JSON 구조를 보기 쉬운 조건 목록으로 편집합니다.'
-                : 'action_data_index를 메시지/필드 매핑 기준으로 편집합니다.'}
+                ? 'workflow_filter를 canonical group/condition 구조로 편집합니다.'
+                : 'action_data_index를 mdfTemplateName과 field 매핑 기준으로 편집합니다.'}
             </DialogDescription>
           </DialogHeader>
 
-          {isFilterColumn(workflowTextEditor?.columnName) ? (
-            workflowFilterDraft.mode === 'raw' ? (
+          <div className="space-y-3">
+            {workflowEditorErrorMessage ? (
+              <p className="rounded-xl border border-[#F0D2D0] bg-[#FFF7F7] px-3 py-2 text-sm text-[#B4483F]">
+                {workflowEditorErrorMessage}
+              </p>
+            ) : null}
+
+            {isFilterColumn(workflowTextEditor?.columnName) ? (
+              workflowFilterDraft.mode === 'raw' ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-[#C5534B]">
+                    현재 값은 structured editor가 안전하게 해석할 수 없어 raw 모드로 유지합니다.
+                  </p>
+                  <textarea
+                    value={workflowFilterDraft.rawValue}
+                    onChange={(event) =>
+                      setWorkflowFilterDraft((previousDraft) => ({
+                        ...previousDraft,
+                        rawValue: event.target.value,
+                      }))
+                    }
+                    className="min-h-[360px] w-full resize-y rounded-xl border border-[#DCE5E0] bg-[#FAFCFB] p-3 font-mono text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-[#E4EAE6] bg-[#FAFCFB] px-4 py-3">
+                    <p className="text-sm font-semibold text-[#1E3D33]">
+                      root group와 하위 condition을 조합해 `and` / `or` 식을 구성합니다.
+                    </p>
+                    <p className="mt-1 text-xs text-[#738078]">
+                      `expected`는 JSON literal 기준으로 입력하면 숫자, boolean, array까지 lossless 하게 저장됩니다.
+                    </p>
+                  </div>
+
+                  <div className="max-h-[60vh] overflow-y-auto pr-1">
+                    <WorkflowNodeEditor
+                      node={workflowFilterDraft.rootGroup}
+                      depth={0}
+                      onUpdateNode={handleUpdateWorkflowNode}
+                      onAddCondition={handleAddWorkflowCondition}
+                      onAddGroup={handleAddWorkflowGroup}
+                      onRemoveNode={handleRemoveWorkflowNode}
+                    />
+                  </div>
+                </div>
+              )
+            ) : actionDataIndexDraft.mode === 'raw' ? (
               <div className="space-y-3">
                 <p className="text-sm text-[#C5534B]">
-                  기존 값이 구조화 편집 규칙과 맞지 않아 raw 모드로 표시합니다.
+                  현재 값은 structured editor가 안전하게 해석할 수 없어 raw 모드로 유지합니다.
                 </p>
                 <textarea
-                  value={workflowFilterDraft.rawValue}
+                  value={actionDataIndexDraft.rawValue}
                   onChange={(event) =>
-                    setWorkflowFilterDraft((previousDraft) => ({
+                    setActionDataIndexDraft((previousDraft) => ({
                       ...previousDraft,
                       rawValue: event.target.value,
                     }))
                   }
-                  className="min-h-[320px] w-full resize-y rounded-xl border border-[#DCE5E0] bg-[#FAFCFB] p-3 font-mono text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+                  className="min-h-[360px] w-full resize-y rounded-xl border border-[#DCE5E0] bg-[#FAFCFB] p-3 font-mono text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
                 />
               </div>
             ) : (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-[#647169]">조건은 위에서 아래로 AND로 평가됩니다.</p>
-                  <Button type="button" variant="outline" onClick={() => setWorkflowFilterDraft((previousDraft) => ({
-                    ...previousDraft,
-                    rows: [...previousDraft.rows, createEmptyWorkflowFilterCondition()],
-                  }))}>
-                    <Plus className="size-3.5" aria-hidden="true" />
-                    조건 추가
-                  </Button>
+              <div className="space-y-4">
+                <div className="grid gap-4 rounded-2xl border border-[#E4EAE6] bg-[#FAFCFB] px-4 py-4 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)_auto]">
+                  <div className="space-y-2.5">
+                    <label className="text-xs font-semibold text-[#1E3D33]">MDF Message</label>
+                    <Select
+                      value={actionDataIndexDraft.mdfTemplateName || EMPTY_MDF_TEMPLATE_VALUE}
+                      onValueChange={(nextValue) =>
+                        setActionDataIndexDraft((previousDraft) => ({
+                          ...previousDraft,
+                          mdfTemplateName:
+                            nextValue === EMPTY_MDF_TEMPLATE_VALUE
+                              ? ''
+                              : nextValue,
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="MDF message를 선택해 주세요." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={EMPTY_MDF_TEMPLATE_VALUE}>선택 안 함</SelectItem>
+                        {workflowMdfMessageOptions.map((messageOption) => (
+                          <SelectItem
+                            key={`${messageOption.sourceName}-${messageOption.messageName}`}
+                            value={messageOption.messageName}
+                          >
+                            {messageOption.messageName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-[#738078]">
+                      현재 model의 MDF XML 내부 메시지 이름을 선택하면 `mdfTemplateName`으로 저장됩니다.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <label className="text-xs font-semibold text-[#1E3D33]">선택된 XML Preview</label>
+                    <div className="min-h-[124px] max-h-[180px] overflow-auto rounded-xl border border-[#DCE5E0] bg-white px-3 py-2.5">
+                      {selectedWorkflowMdfMessage?.xmlSnippet ? (
+                        <pre className="whitespace-pre-wrap break-all font-mono text-xs text-[#22322B]">
+                          {selectedWorkflowMdfMessage.xmlSnippet}
+                        </pre>
+                      ) : actionDataIndexDraft.mdfTemplateName.trim() ? (
+                        <p className="text-sm text-[#65726B]">
+                          현재 `mdfTemplateName`과 일치하는 MDF 메시지를 찾지 못했습니다.
+                        </p>
+                      ) : (
+                        <p className="text-sm text-[#65726B]">
+                          MDF 메시지를 선택하면 전체 XML 조각을 여기에서 바로 확인할 수 있습니다.
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-[#738078]">
+                      {selectedWorkflowMdfMessage?.sourceName
+                        ? `Source MDF: ${selectedWorkflowMdfMessage.sourceName}`
+                        : '업로드된 MDF XML에 정의된 메시지 본문을 그대로 보여 줍니다.'}
+                    </p>
+                  </div>
+
+                  <div className="flex justify-start xl:justify-end xl:pt-7">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        setActionDataIndexDraft((previousDraft) => ({
+                          ...previousDraft,
+                          fields: [...previousDraft.fields, createEmptyActionDataIndexField()],
+                        }))
+                      }
+                    >
+                      <Plus className="size-3.5" aria-hidden="true" />
+                      field 추가
+                    </Button>
+                  </div>
                 </div>
 
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-[#F6F9F7]">
-                      <TableHead>Var</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Xform</TableHead>
-                      <TableHead>Operator</TableHead>
-                      <TableHead>Right</TableHead>
-                      <TableHead className="w-[72px]">작업</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {workflowFilterDraft.rows.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell>
-                          <Input
-                            value={row.variableName}
-                            onChange={(event) =>
-                              setWorkflowFilterDraft((previousDraft) => ({
-                                ...previousDraft,
-                                rows: updateWorkflowFilterDraftRow(previousDraft.rows, row.id, {
-                                  variableName: event.target.value,
-                                }),
-                              }))
-                            }
-                            placeholder="status"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <select
-                            value={row.source}
-                            onChange={(event) =>
-                              setWorkflowFilterDraft((previousDraft) => ({
-                                ...previousDraft,
-                                rows: updateWorkflowFilterDraftRow(previousDraft.rows, row.id, {
-                                  source: event.target.value as ModelVariableSource,
-                                }),
-                              }))
-                            }
-                            className="h-9 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
-                          >
-                            {VARIABLE_SOURCE_OPTIONS.map((source) => (
-                              <option key={source} value={source}>
-                                {source}
-                              </option>
-                            ))}
-                          </select>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={row.transformsText}
-                            onChange={(event) =>
-                              setWorkflowFilterDraft((previousDraft) => ({
-                                ...previousDraft,
-                                rows: updateWorkflowFilterDraftRow(previousDraft.rows, row.id, {
-                                  transformsText: event.target.value,
-                                }),
-                              }))
-                            }
-                            placeholder="trim, lower"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <select
-                            value={row.operator}
-                            onChange={(event) =>
-                              setWorkflowFilterDraft((previousDraft) => ({
-                                ...previousDraft,
-                                rows: updateWorkflowFilterDraftRow(previousDraft.rows, row.id, {
-                                  operator: event.target.value as WorkflowFilterOperator,
-                                }),
-                              }))
-                            }
-                            className="h-9 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
-                          >
-                            {FILTER_OPERATOR_OPTIONS.map((operator) => (
-                              <option key={operator} value={operator}>
-                                {operator}
-                              </option>
-                            ))}
-                          </select>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={row.rightValue}
-                            onChange={(event) =>
-                              setWorkflowFilterDraft((previousDraft) => ({
-                                ...previousDraft,
-                                rows: updateWorkflowFilterDraftRow(previousDraft.rows, row.id, {
-                                  rightValue: event.target.value,
-                                }),
-                              }))
-                            }
-                            placeholder={row.operator === 'in' ? 'A, B, C' : 'ok'}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            className="size-8 rounded-lg text-[#6A7971] hover:bg-[#F3F7F5] hover:text-[#C5534B]"
-                            onClick={() =>
-                              setWorkflowFilterDraft((previousDraft) => ({
-                                ...previousDraft,
-                                rows:
-                                  previousDraft.rows.length > 1
-                                    ? previousDraft.rows.filter((item) => item.id !== row.id)
-                                    : [createEmptyWorkflowFilterCondition()],
-                              }))
-                            }
-                          >
-                            <Trash2 className="size-4" aria-hidden="true" />
-                          </Button>
-                        </TableCell>
+                <div className="max-h-[52vh] overflow-y-auto rounded-2xl border border-[#E4EAE6]">
+                  <Table>
+                    <TableHeader className="sticky top-0 z-10 bg-[#F6F9F7]">
+                      <TableRow className="bg-[#F6F9F7]">
+                        <TableHead>Field</TableHead>
+                        <TableHead>from</TableHead>
+                        <TableHead>path</TableHead>
+                        <TableHead>transforms</TableHead>
+                        <TableHead className="w-[72px]">작업</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )
-          ) : actionDataIndexDraft.mode === 'raw' ? (
-            <div className="space-y-3">
-              <p className="text-sm text-[#C5534B]">
-                기존 값이 구조화 편집 규칙과 맞지 않아 raw 모드로 표시합니다.
-              </p>
-              <textarea
-                value={actionDataIndexDraft.rawValue}
-                onChange={(event) =>
-                  setActionDataIndexDraft((previousDraft) => ({
-                    ...previousDraft,
-                    rawValue: event.target.value,
-                  }))
-                }
-                className="min-h-[320px] w-full resize-y rounded-xl border border-[#DCE5E0] bg-[#FAFCFB] p-3 font-mono text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
-              />
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="grid gap-3 md:grid-cols-[minmax(0,320px)_auto] md:items-end">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-[#1E3D33]">MDF Message</label>
-                  <Input
-                    value={actionDataIndexDraft.messageName}
-                    onChange={(event) =>
-                      setActionDataIndexDraft((previousDraft) => ({
-                        ...previousDraft,
-                        messageName: event.target.value,
-                      }))
-                    }
-                    placeholder="TOOL_CONDITION_REPLY_MES"
-                  />
+                    </TableHeader>
+                    <TableBody>
+                      {actionDataIndexDraft.fields.map((field) => (
+                        <TableRow key={field.id} className="align-top">
+                          <TableCell>
+                            <Input
+                              value={field.fieldName}
+                              onChange={(event) =>
+                                setActionDataIndexDraft((previousDraft) => ({
+                                  ...previousDraft,
+                                  fields: updateActionDataIndexDraftRow(
+                                    previousDraft.fields,
+                                    field.id,
+                                    {
+                                      fieldName: event.target.value,
+                                    },
+                                  ),
+                                }))
+                              }
+                              placeholder="EQPID"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <select
+                              value={field.from}
+                              onChange={(event) =>
+                                setActionDataIndexDraft((previousDraft) => ({
+                                  ...previousDraft,
+                                  fields: updateActionDataIndexDraftRow(
+                                    previousDraft.fields,
+                                    field.id,
+                                    {
+                                      from: event.target.value as WorkflowLookupSource,
+                                    },
+                                  ),
+                                }))
+                              }
+                              className="h-9 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+                            >
+                              {LOOKUP_SOURCE_OPTIONS.map((source) => (
+                                <option key={source} value={source}>
+                                  {source}
+                                </option>
+                              ))}
+                            </select>
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={field.path}
+                              onChange={(event) =>
+                                setActionDataIndexDraft((previousDraft) => ({
+                                  ...previousDraft,
+                                  fields: updateActionDataIndexDraftRow(
+                                    previousDraft.fields,
+                                    field.id,
+                                    {
+                                      path: event.target.value,
+                                    },
+                                  ),
+                                }))
+                              }
+                              placeholder="eqpId"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-2">
+                              {field.transforms.length === 0 ? (
+                                <p className="text-[11px] text-[#97A39C]">transform 없음</p>
+                              ) : (
+                                field.transforms.map((transform) => (
+                                  <div key={transform.id} className="flex items-center gap-2">
+                                    <Input
+                                      value={transform.value}
+                                      onChange={(event) =>
+                                        setActionDataIndexDraft((previousDraft) => ({
+                                          ...previousDraft,
+                                          fields: updateActionDataIndexDraftRow(
+                                            previousDraft.fields,
+                                            field.id,
+                                            {
+                                              transforms: updateTransforms(
+                                                field.transforms,
+                                                transform.id,
+                                                { value: event.target.value },
+                                              ),
+                                            },
+                                          ),
+                                        }))
+                                      }
+                                      placeholder="trim"
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon-sm"
+                                      className="size-8 rounded-lg text-[#6A7971] hover:bg-[#F3F7F5] hover:text-[#C5534B]"
+                                      onClick={() =>
+                                        setActionDataIndexDraft((previousDraft) => ({
+                                          ...previousDraft,
+                                          fields: updateActionDataIndexDraftRow(
+                                            previousDraft.fields,
+                                            field.id,
+                                            {
+                                              transforms: field.transforms.filter(
+                                                (item) => item.id !== transform.id,
+                                              ),
+                                            },
+                                          ),
+                                        }))
+                                      }
+                                      aria-label="transform 삭제"
+                                    >
+                                      <Trash2 className="size-4" aria-hidden="true" />
+                                    </Button>
+                                  </div>
+                                ))
+                              )}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  setActionDataIndexDraft((previousDraft) => ({
+                                    ...previousDraft,
+                                    fields: updateActionDataIndexDraftRow(
+                                      previousDraft.fields,
+                                      field.id,
+                                      {
+                                        transforms: [...field.transforms, createTransformDraft()],
+                                      },
+                                    ),
+                                  }))
+                                }
+                              >
+                                <Plus className="size-3.5" aria-hidden="true" />
+                                transform 추가
+                              </Button>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="size-8 rounded-lg text-[#6A7971] hover:bg-[#F3F7F5] hover:text-[#C5534B]"
+                              onClick={() =>
+                                setActionDataIndexDraft((previousDraft) => ({
+                                  ...previousDraft,
+                                  fields:
+                                    previousDraft.fields.length > 1
+                                      ? previousDraft.fields.filter((item) => item.id !== field.id)
+                                      : [createEmptyActionDataIndexField()],
+                                }))
+                              }
+                              aria-label="field 삭제"
+                            >
+                              <Trash2 className="size-4" aria-hidden="true" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
-                <div className="flex justify-start md:justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() =>
-                      setActionDataIndexDraft((previousDraft) => ({
-                        ...previousDraft,
-                        fields: [...previousDraft.fields, createEmptyActionDataIndexField()],
-                      }))
-                    }
-                  >
-                    <Plus className="size-3.5" aria-hidden="true" />
-                    필드 추가
-                  </Button>
-                </div>
               </div>
-
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-[#F6F9F7]">
-                    <TableHead>Field</TableHead>
-                    <TableHead>Fixed</TableHead>
-                    <TableHead>Var</TableHead>
-                    <TableHead>Source</TableHead>
-                    <TableHead>Xform</TableHead>
-                    <TableHead className="w-[92px]">Required</TableHead>
-                    <TableHead className="w-[72px]">작업</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {actionDataIndexDraft.fields.map((field) => (
-                    <TableRow key={field.id}>
-                      <TableCell>
-                        <Input
-                          value={field.fieldName}
-                          onChange={(event) =>
-                            setActionDataIndexDraft((previousDraft) => ({
-                              ...previousDraft,
-                              fields: updateActionDataIndexDraftRow(previousDraft.fields, field.id, {
-                                fieldName: event.target.value,
-                              }),
-                            }))
-                          }
-                          placeholder="EQPID"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={field.fixedValue}
-                          onChange={(event) =>
-                            setActionDataIndexDraft((previousDraft) => ({
-                              ...previousDraft,
-                              fields: updateActionDataIndexDraftRow(previousDraft.fields, field.id, {
-                                fixedValue: event.target.value,
-                              }),
-                            }))
-                          }
-                          placeholder="E000"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={field.variableName}
-                          onChange={(event) =>
-                            setActionDataIndexDraft((previousDraft) => ({
-                              ...previousDraft,
-                              fields: updateActionDataIndexDraftRow(previousDraft.fields, field.id, {
-                                variableName: event.target.value,
-                              }),
-                            }))
-                          }
-                          placeholder="eqpId"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <select
-                          value={field.source}
-                          onChange={(event) =>
-                            setActionDataIndexDraft((previousDraft) => ({
-                              ...previousDraft,
-                              fields: updateActionDataIndexDraftRow(previousDraft.fields, field.id, {
-                                source: event.target.value as ModelVariableSource,
-                              }),
-                            }))
-                          }
-                          className="h-9 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
-                        >
-                          {VARIABLE_SOURCE_OPTIONS.map((source) => (
-                            <option key={source} value={source}>
-                              {source}
-                            </option>
-                          ))}
-                        </select>
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={field.transformsText}
-                          onChange={(event) =>
-                            setActionDataIndexDraft((previousDraft) => ({
-                              ...previousDraft,
-                              fields: updateActionDataIndexDraftRow(previousDraft.fields, field.id, {
-                                transformsText: event.target.value,
-                              }),
-                            }))
-                          }
-                          placeholder="trim, upper"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <label className="inline-flex h-9 items-center gap-2 text-sm text-[#22322B]">
-                          <input
-                            type="checkbox"
-                            checked={field.required}
-                            onChange={(event) =>
-                              setActionDataIndexDraft((previousDraft) => ({
-                                ...previousDraft,
-                                fields: updateActionDataIndexDraftRow(previousDraft.fields, field.id, {
-                                  required: event.target.checked,
-                                }),
-                              }))
-                            }
-                            className="size-4 rounded border border-[#DCE5E0]"
-                          />
-                          필수
-                        </label>
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="size-8 rounded-lg text-[#6A7971] hover:bg-[#F3F7F5] hover:text-[#C5534B]"
-                          onClick={() =>
-                            setActionDataIndexDraft((previousDraft) => ({
-                              ...previousDraft,
-                              fields:
-                                previousDraft.fields.length > 1
-                                  ? previousDraft.fields.filter((item) => item.id !== field.id)
-                                  : [createEmptyActionDataIndexField()],
-                            }))
-                          }
-                        >
-                          <Trash2 className="size-4" aria-hidden="true" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
+            )}
+          </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={handleCloseWorkflowTextEditor}>

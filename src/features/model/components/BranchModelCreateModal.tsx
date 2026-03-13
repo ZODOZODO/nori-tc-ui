@@ -130,7 +130,8 @@ export function BranchModelCreateModal({
         <DialogHeader>
           <DialogTitle>Branch Model Create</DialogTitle>
           <DialogDescription>
-            선택한 root model의 버전을 복제해 branch `EDIT/DEVELOP` 모델을 생성합니다.
+            선택한 root model 버전을 baseline branch로 복제하고, 생성 시점에는 임시 버전이 자동 부여됩니다.
+            생성 직후에는 읽기 전용이며 실제 편집은 Check Out 후 EDIT 작업본에서 진행합니다.
           </DialogDescription>
         </DialogHeader>
 

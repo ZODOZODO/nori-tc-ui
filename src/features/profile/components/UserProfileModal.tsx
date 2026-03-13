@@ -161,13 +161,12 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#121A174D] px-4" onClick={closeModal}>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#121A174D] px-4">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="user-profile-modal-title"
         className="w-full max-w-[640px] rounded-[24px] border border-[#E8E4DF] bg-white p-[26px] shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
       >
         <div className="flex flex-col gap-[18px]">
           <header className="flex items-start gap-3">

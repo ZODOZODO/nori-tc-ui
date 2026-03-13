@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { CircleUserRound, Loader2, LogOut, RotateCcw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
+import { clampSidebarWidth } from '@/shared/layout/sidebar-layout'
 import { CheckInModal } from './CheckInModal'
 import { EqpDeleteConfirmDialog } from './EqpDeleteConfirmDialog'
 import { EqpInfoTable } from './EqpInfoTable'
@@ -45,8 +46,6 @@ const EMPTY_VERSION_VALUE = ''
 const NO_VERSION_OPTION_LABEL = '버전 없음'
 const HEADER_HORIZONTAL_PADDING_PX = 20
 const CONTENT_START_PADDING_PX = 16
-const SIDEBAR_EXPANDED_WIDTH_PX = 240
-const SIDEBAR_COLLAPSED_WIDTH_PX = 56
 
 // ResizableDivider 크기 제한 (%)
 const PANEL_MIN_PERCENT = 15
@@ -165,12 +164,14 @@ export function EqpPage() {
 
   const selection = useEqpUiStore((state) => state.selection)
   const sidebarOpen = useEqpUiStore((state) => state.sidebarOpen)
+  const sidebarWidth = useEqpUiStore((state) => state.sidebarWidth)
   const isEditMode = useEqpUiStore((state) => state.isEditMode)
   const isProfileModalOpen = useEqpUiStore((state) => state.isProfileModalOpen)
   const selectEqp = useEqpUiStore((state) => state.selectEqp)
   const selectGatewayGroup = useEqpUiStore((state) => state.selectGatewayGroup)
   const clearSelection = useEqpUiStore((state) => state.clearSelection)
   const toggleSidebar = useEqpUiStore((state) => state.toggleSidebar)
+  const setSidebarWidth = useEqpUiStore((state) => state.setSidebarWidth)
   const setEditMode = useEqpUiStore((state) => state.setEditMode)
   const setProfileModalOpen = useEqpUiStore((state) => state.setProfileModalOpen)
 
@@ -516,6 +517,17 @@ export function EqpPage() {
     })
   }, [])
 
+  const handleSidebarDrag = useCallback(
+    (deltaX: number) => {
+      if (!sidebarOpen) {
+        return
+      }
+
+      setSidebarWidth(clampSidebarWidth(sidebarWidth + deltaX))
+    },
+    [setSidebarWidth, sidebarOpen, sidebarWidth],
+  )
+
   /**
    * Check Out 버튼 클릭: DB에 EDIT 버전 파라미터 생성 후 편집 모드로 전환합니다.
    * appliedVersion이 없으면 빈 EDIT 버전으로 체크아웃합니다 (백엔드 허용).
@@ -823,9 +835,8 @@ export function EqpPage() {
 
   // 사이드바에 전달할 선택된 그룹 인덱스
   const selectedGroupIndex = selection.type === 'gateway_group' ? selection.groupIndex : null
-  const topNavigationOffsetPx = sidebarOpen
-    ? SIDEBAR_EXPANDED_WIDTH_PX + CONTENT_START_PADDING_PX - HEADER_HORIZONTAL_PADDING_PX
-    : SIDEBAR_COLLAPSED_WIDTH_PX + CONTENT_START_PADDING_PX - HEADER_HORIZONTAL_PADDING_PX
+  const topNavigationOffsetPx =
+    sidebarWidth + CONTENT_START_PADDING_PX - HEADER_HORIZONTAL_PADDING_PX
 
   const handleNavigateMenu = (route: string | null) => {
     if (!route || route === '/eqp') {
@@ -911,6 +922,7 @@ export function EqpPage() {
           selectedEqpId={selectedEqpId}
           selectedGroupIndex={selectedGroupIndex}
           sidebarOpen={sidebarOpen}
+          sidebarWidth={sidebarWidth}
           isLoading={eqpListQuery.isLoading}
           errorMessage={listErrorMessage}
           onSelectEqp={handleSelectEqp}
@@ -921,6 +933,7 @@ export function EqpPage() {
           onOpenEqpDelete={openEqpDeleteDialog}
           onOpenEqpCreate={openEqpCreateDialog}
           onToggleSidebar={toggleSidebar}
+          onResizeSidebar={handleSidebarDrag}
         />
 
         <section className="flex min-w-0 flex-1 flex-col">

@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { SidebarResizeHandle } from '@/components/ui/sidebar-resize-handle'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -17,6 +18,7 @@ interface ModelSidebarProps {
   modelItems: ModelInfo[]
   selectedModelVersionKey: number | null
   sidebarOpen: boolean
+  sidebarWidth: number
   isLoading: boolean
   errorMessage: string | null
   onSelectModel: (model: ModelInfo) => void
@@ -32,6 +34,7 @@ interface ModelSidebarProps {
   isBranchCommitDisabled: (model: ModelInfo) => boolean
   isBranchDeleteDisabled: (model: ModelInfo) => boolean
   onToggleSidebar: () => void
+  onResizeSidebar: (deltaX: number) => void
 }
 
 interface SectionProps {
@@ -257,6 +260,7 @@ export function ModelSidebar({
   modelItems,
   selectedModelVersionKey,
   sidebarOpen,
+  sidebarWidth,
   isLoading,
   errorMessage,
   onSelectModel,
@@ -272,6 +276,7 @@ export function ModelSidebar({
   isBranchCommitDisabled,
   isBranchDeleteDisabled,
   onToggleSidebar,
+  onResizeSidebar,
 }: ModelSidebarProps) {
   const [searchKeyword, setSearchKeyword] = useState('')
 
@@ -287,7 +292,10 @@ export function ModelSidebar({
 
   if (!sidebarOpen) {
     return (
-      <aside className="flex w-14 flex-col self-stretch border-r border-[#E4EAE6] bg-white">
+      <aside
+        className="flex flex-col self-stretch border-r border-[#E4EAE6] bg-white"
+        style={{ width: `${sidebarWidth}px` }}
+      >
         <div className="flex h-[52px] items-center justify-center border-b border-[#E4EAE6]">
           <button
             type="button"
@@ -303,72 +311,81 @@ export function ModelSidebar({
   }
 
   return (
-    <aside className="flex w-72 flex-col self-stretch border-r border-[#E4EAE6] bg-white">
-      <div className="flex h-[52px] items-center justify-between border-b border-[#E4EAE6] px-3">
-        <span className="text-sm font-semibold text-[#243129]">Model Info</span>
-        <button
-          type="button"
-          onClick={onToggleSidebar}
-          className="flex size-8 items-center justify-center rounded-md border border-[#D8E1DB] text-[#516058] hover:bg-[#F2F7F3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
-          aria-label="사이드바 축소"
-        >
-          <ChevronLeft className="size-4" />
-        </button>
-      </div>
+    <aside
+      className="flex flex-col self-stretch border-r border-[#E4EAE6] bg-white"
+      style={{ width: `${sidebarWidth}px` }}
+    >
+      <div className="flex min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex h-[52px] items-center justify-between border-b border-[#E4EAE6] px-3">
+            <span className="truncate text-sm font-semibold text-[#243129]">Model Info</span>
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className="flex size-8 items-center justify-center rounded-md border border-[#D8E1DB] text-[#516058] hover:bg-[#F2F7F3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+              aria-label="사이드바 축소"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+          </div>
 
-      <div className="px-3 py-3">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-[#9AA49E]" />
-          <Input
-            value={searchKeyword}
-            onChange={(event) => setSearchKeyword(event.target.value)}
-            placeholder="Model Name 검색"
-            className="h-9 bg-[#F7FAF8] pl-8 text-xs"
-          />
+          <div className="px-3 py-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-[#9AA49E]" />
+              <Input
+                value={searchKeyword}
+                onChange={(event) => setSearchKeyword(event.target.value)}
+                placeholder="Model Name 검색"
+                className="h-9 bg-[#F7FAF8] pl-8 text-xs"
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-3">
+            <InterfaceSection
+              title="SECS"
+              interfaceType="SECS"
+              nodes={secsRoots}
+              selectedModelName={selectedModel?.modelName ?? null}
+              onSelectModel={onSelectModel}
+              onOpenRootCreate={onOpenRootCreate}
+              onOpenRootUpdate={onOpenRootUpdate}
+              onOpenBranchCreate={onOpenBranchCreate}
+              onOpenDeleteDeprecatedBranches={onOpenDeleteDeprecatedBranches}
+              onOpenModelDelete={onOpenModelDelete}
+              onOpenParentCommit={onOpenParentCommit}
+              onOpenBranchDelete={onOpenBranchDelete}
+              isRootDeleteDisabled={isRootDeleteDisabled}
+              isDeprecatedBranchDeleteDisabled={isDeprecatedBranchDeleteDisabled}
+              isBranchCommitDisabled={isBranchCommitDisabled}
+              isBranchDeleteDisabled={isBranchDeleteDisabled}
+            />
+
+            <InterfaceSection
+              title="Socket"
+              interfaceType="SOCKET"
+              nodes={socketRoots}
+              selectedModelName={selectedModel?.modelName ?? null}
+              onSelectModel={onSelectModel}
+              onOpenRootCreate={onOpenRootCreate}
+              onOpenRootUpdate={onOpenRootUpdate}
+              onOpenBranchCreate={onOpenBranchCreate}
+              onOpenDeleteDeprecatedBranches={onOpenDeleteDeprecatedBranches}
+              onOpenModelDelete={onOpenModelDelete}
+              onOpenParentCommit={onOpenParentCommit}
+              onOpenBranchDelete={onOpenBranchDelete}
+              isRootDeleteDisabled={isRootDeleteDisabled}
+              isDeprecatedBranchDeleteDisabled={isDeprecatedBranchDeleteDisabled}
+              isBranchCommitDisabled={isBranchCommitDisabled}
+              isBranchDeleteDisabled={isBranchDeleteDisabled}
+            />
+
+            {isLoading ? <p className="px-2 text-xs text-[#6D7972]">모델 목록을 불러오는 중입니다.</p> : null}
+            {errorMessage ? <p className="px-2 text-xs text-[#C5534B]">{errorMessage}</p> : null}
+          </div>
         </div>
-      </div>
 
-      <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-3">
-        <InterfaceSection
-          title="SECS"
-          interfaceType="SECS"
-          nodes={secsRoots}
-          selectedModelName={selectedModel?.modelName ?? null}
-          onSelectModel={onSelectModel}
-          onOpenRootCreate={onOpenRootCreate}
-          onOpenRootUpdate={onOpenRootUpdate}
-          onOpenBranchCreate={onOpenBranchCreate}
-          onOpenDeleteDeprecatedBranches={onOpenDeleteDeprecatedBranches}
-          onOpenModelDelete={onOpenModelDelete}
-          onOpenParentCommit={onOpenParentCommit}
-          onOpenBranchDelete={onOpenBranchDelete}
-          isRootDeleteDisabled={isRootDeleteDisabled}
-          isDeprecatedBranchDeleteDisabled={isDeprecatedBranchDeleteDisabled}
-          isBranchCommitDisabled={isBranchCommitDisabled}
-          isBranchDeleteDisabled={isBranchDeleteDisabled}
-        />
-
-        <InterfaceSection
-          title="Socket"
-          interfaceType="SOCKET"
-          nodes={socketRoots}
-          selectedModelName={selectedModel?.modelName ?? null}
-          onSelectModel={onSelectModel}
-          onOpenRootCreate={onOpenRootCreate}
-          onOpenRootUpdate={onOpenRootUpdate}
-          onOpenBranchCreate={onOpenBranchCreate}
-          onOpenDeleteDeprecatedBranches={onOpenDeleteDeprecatedBranches}
-          onOpenModelDelete={onOpenModelDelete}
-          onOpenParentCommit={onOpenParentCommit}
-          onOpenBranchDelete={onOpenBranchDelete}
-          isRootDeleteDisabled={isRootDeleteDisabled}
-          isDeprecatedBranchDeleteDisabled={isDeprecatedBranchDeleteDisabled}
-          isBranchCommitDisabled={isBranchCommitDisabled}
-          isBranchDeleteDisabled={isBranchDeleteDisabled}
-        />
-
-        {isLoading ? <p className="px-2 text-xs text-[#6D7972]">모델 목록을 불러오는 중입니다.</p> : null}
-        {errorMessage ? <p className="px-2 text-xs text-[#C5534B]">{errorMessage}</p> : null}
+        <SidebarResizeHandle onDrag={onResizeSidebar} />
       </div>
     </aside>
   )

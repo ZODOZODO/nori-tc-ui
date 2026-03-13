@@ -1,16 +1,26 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
+import {
+  clampSidebarWidth,
+  SIDEBAR_COLLAPSED_WIDTH_PX,
+  SIDEBAR_DEFAULT_WIDTH_PX,
+} from '@/shared/layout/sidebar-layout'
 import type { EqpSelection } from '../types/eqp.types'
 
 interface EqpUiState {
   selection: EqpSelection
   sidebarOpen: boolean
+  sidebarWidth: number
+  expandedSidebarWidth: number
   isEditMode: boolean
   isProfileModalOpen: boolean
   selectEqp: (eqpId: string) => void
   selectGatewayGroup: (groupIndex: number) => void
   clearSelection: () => void
   setSidebarOpen: (open: boolean) => void
+  setSidebarWidth: (width: number) => void
+  expandSidebar: () => void
+  collapseSidebar: () => void
   toggleSidebar: () => void
   setEditMode: (enabled: boolean) => void
   setProfileModalOpen: (open: boolean) => void
@@ -34,6 +44,8 @@ export const useEqpUiStore = create<EqpUiState>()(
     (set) => ({
       selection: { type: 'none' },
       sidebarOpen: true,
+      sidebarWidth: SIDEBAR_DEFAULT_WIDTH_PX,
+      expandedSidebarWidth: SIDEBAR_DEFAULT_WIDTH_PX,
       isEditMode: false,
       isProfileModalOpen: false,
       // 개별 설비 선택
@@ -42,8 +54,49 @@ export const useEqpUiStore = create<EqpUiState>()(
       selectGatewayGroup: (groupIndex) => set({ selection: { type: 'gateway_group', groupIndex } }),
       // 선택 초기화
       clearSelection: () => set({ selection: { type: 'none' } }),
-      setSidebarOpen: (open) => set({ sidebarOpen: open }),
-      toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+      setSidebarOpen: (open) =>
+        set((state) =>
+          open
+            ? {
+                sidebarOpen: true,
+                sidebarWidth: clampSidebarWidth(state.expandedSidebarWidth),
+              }
+            : {
+                sidebarOpen: false,
+                sidebarWidth: SIDEBAR_COLLAPSED_WIDTH_PX,
+                expandedSidebarWidth: clampSidebarWidth(state.sidebarWidth),
+              },
+        ),
+      setSidebarWidth: (width) =>
+        set({
+          sidebarOpen: true,
+          sidebarWidth: clampSidebarWidth(width),
+          expandedSidebarWidth: clampSidebarWidth(width),
+        }),
+      expandSidebar: () =>
+        set((state) => ({
+          sidebarOpen: true,
+          sidebarWidth: clampSidebarWidth(state.expandedSidebarWidth),
+        })),
+      collapseSidebar: () =>
+        set((state) => ({
+          sidebarOpen: false,
+          sidebarWidth: SIDEBAR_COLLAPSED_WIDTH_PX,
+          expandedSidebarWidth: clampSidebarWidth(state.sidebarWidth),
+        })),
+      toggleSidebar: () =>
+        set((state) =>
+          state.sidebarOpen
+            ? {
+                sidebarOpen: false,
+                sidebarWidth: SIDEBAR_COLLAPSED_WIDTH_PX,
+                expandedSidebarWidth: clampSidebarWidth(state.sidebarWidth),
+              }
+            : {
+                sidebarOpen: true,
+                sidebarWidth: clampSidebarWidth(state.expandedSidebarWidth),
+              },
+        ),
       setEditMode: (enabled) => set({ isEditMode: enabled }),
       setProfileModalOpen: (open) => set({ isProfileModalOpen: open }),
     }),

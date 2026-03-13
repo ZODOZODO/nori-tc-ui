@@ -1,90 +1,92 @@
-const FILTER_OPERATORS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'in'] as const
-const DATA_INDEX_RESERVED_KEYS = new Set(['mdf', 'message', 'messageName', 'fields'])
+const LOOKUP_SOURCE_OPTIONS = ['data', 'metadata'] as const
+const WORKFLOW_COMPARISON_OPTIONS = [
+  'equals',
+  'not_equals',
+  'greater_than',
+  'greater_than_or_equal',
+  'less_than',
+  'less_than_or_equal',
+  'contains',
+  'in',
+] as const
 
-export type WorkflowFilterOperator = (typeof FILTER_OPERATORS)[number]
-export type ModelVariableSource = 'AUTO' | 'MSG' | 'CTX'
+type EditorMode = 'structured' | 'raw'
+type WorkflowGroupType = 'and' | 'or'
 
-export interface WorkflowFilterConditionDraft {
+export type WorkflowLookupSource = (typeof LOOKUP_SOURCE_OPTIONS)[number]
+export type WorkflowComparison = (typeof WORKFLOW_COMPARISON_OPTIONS)[number]
+
+export interface TransformDraft {
   id: string
-  variableName: string
-  source: ModelVariableSource
-  transformsText: string
-  operator: WorkflowFilterOperator
-  rightValue: string
+  value: string
 }
 
+export interface WorkflowConditionDraft {
+  id: string
+  nodeType: 'condition'
+  from: WorkflowLookupSource
+  path: string
+  comparison: WorkflowComparison
+  expectedText: string
+  transforms: TransformDraft[]
+}
+
+export interface WorkflowGroupDraft {
+  id: string
+  nodeType: 'group'
+  groupType: WorkflowGroupType
+  children: WorkflowNodeDraft[]
+}
+
+export type WorkflowNodeDraft = WorkflowConditionDraft | WorkflowGroupDraft
+
 export interface WorkflowFilterEditorDraft {
-  mode: 'structured' | 'raw'
+  mode: EditorMode
   rawValue: string
-  rows: WorkflowFilterConditionDraft[]
+  rootGroup: WorkflowGroupDraft
 }
 
 export interface ActionDataIndexFieldDraft {
   id: string
   fieldName: string
-  variableName: string
-  source: ModelVariableSource
-  transformsText: string
-  fixedValue: string
-  required: boolean
+  from: WorkflowLookupSource
+  path: string
+  transforms: TransformDraft[]
 }
 
 export interface ActionDataIndexEditorDraft {
-  mode: 'structured' | 'raw'
+  mode: EditorMode
   rawValue: string
-  messageName: string
+  mdfTemplateName: string
   fields: ActionDataIndexFieldDraft[]
 }
 
-const createEditorRowId = (): string =>
+const WORKFLOW_CONDITION_KEYS = new Set(['from', 'path', 'comparison', 'expected', 'transforms'])
+const ACTION_DATA_INDEX_ROOT_KEYS = new Set(['mdfTemplateName', 'fields'])
+const ACTION_DATA_INDEX_FIELD_KEYS = new Set(['from', 'path', 'transforms'])
+
+const createEditorId = (): string =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 const normalizeText = (value: string | null | undefined): string => value?.trim() ?? ''
-const isNonNull = <T>(value: T | null): value is T => value !== null
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
 
-const normalizeSource = (value: unknown): ModelVariableSource => {
-  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : ''
-  if (normalized === 'MSG' || normalized === 'CTX') {
-    return normalized
-  }
-  return 'AUTO'
-}
+const collapseWhitespace = (value: string): string => value.trim().replaceAll(/\s+/g, ' ')
 
-const splitTransforms = (value: unknown): string[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => (typeof item === 'string' ? item.trim() : ''))
-      .filter((item) => item.length > 0)
-  }
-
-  if (typeof value === 'string') {
-    return value
-      .split(',')
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0)
-  }
-
-  return []
-}
-
-const stringifyRightValue = (value: unknown): string => {
-  if (value === null || value === undefined) {
+const normalizeFirstLine = (value: string): string => {
+  if (!value.trim()) {
     return ''
   }
 
-  if (typeof value === 'string') {
-    return value
+  for (const line of value.split(/\r?\n/)) {
+    const normalizedLine = collapseWhitespace(line)
+    if (normalizedLine) {
+      return normalizedLine
+    }
   }
 
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item ?? '')).join(', ')
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value)
-  }
-
-  return JSON.stringify(value)
+  return collapseWhitespace(value)
 }
 
 const parseRawJsonObject = (value: string): Record<string, unknown> | null => {
@@ -95,96 +97,433 @@ const parseRawJsonObject = (value: string): Record<string, unknown> | null => {
 
   try {
     const parsed = JSON.parse(normalized)
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>
-    }
+    return isRecord(parsed) ? parsed : null
   } catch {
     return null
   }
-
-  return null
 }
 
-export const createEmptyWorkflowFilterCondition = (): WorkflowFilterConditionDraft => ({
-  id: createEditorRowId(),
-  variableName: '',
-  source: 'AUTO',
-  transformsText: '',
-  operator: 'eq',
-  rightValue: '',
+const validateAllowedKeys = (
+  candidate: Record<string, unknown>,
+  allowedKeys: Set<string>,
+  label: string,
+) => {
+  const invalidKeys = Object.keys(candidate).filter((key) => !allowedKeys.has(key))
+  if (invalidKeys.length > 0) {
+    throw new Error(`${label} 허용되지 않은 키: ${invalidKeys.join(', ')}`)
+  }
+}
+
+const parseLookupSource = (value: unknown, label: string): WorkflowLookupSource => {
+  const normalized = normalizeText(typeof value === 'string' ? value : '')
+  if (normalized !== 'data' && normalized !== 'metadata') {
+    throw new Error(label)
+  }
+  return normalized
+}
+
+const parseRelativePath = (value: unknown, label: string): string => {
+  const normalized = normalizeText(typeof value === 'string' ? value : '')
+  if (normalized.startsWith('data.') || normalized.startsWith('metadata.')) {
+    throw new Error(label)
+  }
+  return normalized
+}
+
+const parseWorkflowComparison = (value: unknown): WorkflowComparison => {
+  const normalized = normalizeText(typeof value === 'string' ? value : '')
+  if (
+    !WORKFLOW_COMPARISON_OPTIONS.includes(normalized as WorkflowComparison)
+  ) {
+    throw new Error('workflow_filter 조건의 comparison은 표준 연산만 허용됩니다.')
+  }
+  return normalized as WorkflowComparison
+}
+
+const stringifyExpectedText = (value: unknown): string => {
+  if (value === undefined) {
+    return ''
+  }
+
+  if (typeof value === 'string') {
+    return JSON.stringify(value)
+  }
+
+  return JSON.stringify(value)
+}
+
+const stringifyPreviewValue = (value: unknown): string => {
+  if (value === null) {
+    return 'null'
+  }
+
+  if (typeof value === 'string') {
+    return `"${value}"`
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stringifyPreviewValue(item)).join(', ')}]`
+  }
+
+  if (isRecord(value)) {
+    const entries = Object.entries(value).map(
+      ([key, childValue]) => `${key}=${stringifyPreviewValue(childValue)}`,
+    )
+    return `{${entries.join(', ')}}`
+  }
+
+  return String(value)
+}
+
+const parseTransformValue = (value: unknown): string => {
+  if (typeof value === 'string') {
+    const normalized = normalizeText(value)
+    if (!normalized) {
+      throw new Error('transform 문자열은 비어 있을 수 없습니다.')
+    }
+    return normalized
+  }
+
+  if (!isRecord(value)) {
+    throw new Error('transform은 문자열 또는 object여야 합니다.')
+  }
+
+  const name = normalizeText(typeof value.name === 'string' ? value.name : '')
+  if (!name) {
+    throw new Error('transform의 name은 필수입니다.')
+  }
+
+  if (value.args === undefined || value.args === null) {
+    return name.toLowerCase()
+  }
+
+  if (!Array.isArray(value.args)) {
+    throw new Error('transform의 args는 배열이어야 합니다.')
+  }
+
+  return `${name.toLowerCase()}(${value.args
+    .map((item) => stringifyPreviewValue(item))
+    .join(', ')})`
+}
+
+const parseTransforms = (value: unknown, label: string): TransformDraft[] => {
+  if (value === undefined || value === null) {
+    return []
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(label)
+  }
+
+  return value.map((item) => createTransformDraft(parseTransformValue(item)))
+}
+
+const parseEditorLiteral = (value: string): unknown => {
+  const normalized = value.trim()
+  if (!normalized) {
+    return undefined
+  }
+
+  try {
+    return JSON.parse(normalized)
+  } catch {
+    return normalized
+  }
+}
+
+const serializeTransforms = (transforms: TransformDraft[]): string[] =>
+  transforms
+    .map((transform) => normalizeText(transform.value))
+    .filter((transform) => transform.length > 0)
+
+const summarizeWorkflowNode = (node: WorkflowNodeDraft): string => {
+  if (node.nodeType === 'group') {
+    return `${node.groupType}(${node.children.map((child) => summarizeWorkflowNode(child)).join(', ')})`
+  }
+
+  const summaryParts = [
+    `${node.from}.${node.path}`,
+    `{comparison=${node.comparison}`,
+  ]
+
+  const parsedExpected = parseEditorLiteral(node.expectedText)
+  if (parsedExpected !== undefined) {
+    summaryParts.push(`, expected=${stringifyPreviewValue(parsedExpected)}`)
+  }
+
+  const transforms = serializeTransforms(node.transforms)
+  if (transforms.length > 0) {
+    summaryParts.push(`, transforms=[${transforms.join(', ')}]`)
+  }
+
+  summaryParts.push('}')
+  return summaryParts.join('')
+}
+
+const summarizeActionField = (
+  fieldName: string,
+  field: ActionDataIndexFieldDraft,
+  mdfTemplateName: string,
+): string => {
+  const summaryParts = [
+    `mdfTemplateName=${mdfTemplateName}`,
+    ` / ${fieldName} {from=${field.from}, path=${field.path}`,
+  ]
+
+  const transforms = serializeTransforms(field.transforms)
+  if (transforms.length > 0) {
+    summaryParts.push(`, transforms=[${transforms.join(', ')}]`)
+  }
+
+  summaryParts.push('}')
+  return summaryParts.join('')
+}
+
+const parseWorkflowConditionDraft = (candidate: Record<string, unknown>): WorkflowConditionDraft => {
+  validateAllowedKeys(
+    candidate,
+    WORKFLOW_CONDITION_KEYS,
+    'workflow_filter 조건에는 from, path, comparison, expected, transforms만 허용됩니다.',
+  )
+
+  if (isRecord(candidate.expected)) {
+    throw new Error('workflow_filter 조건의 expected는 object일 수 없습니다.')
+  }
+
+  return {
+    id: createEditorId(),
+    nodeType: 'condition',
+    from: parseLookupSource(
+      candidate.from,
+      'workflow_filter 조건의 from은 data 또는 metadata만 허용됩니다.',
+    ),
+    path: parseRelativePath(
+      candidate.path,
+      'workflow_filter 조건의 path는 from 기준 상대 경로여야 합니다.',
+    ),
+    comparison: parseWorkflowComparison(candidate.comparison),
+    expectedText: stringifyExpectedText(candidate.expected),
+    transforms: parseTransforms(
+      candidate.transforms,
+      'workflow_filter 조건의 transforms는 배열이어야 합니다.',
+    ),
+  }
+}
+
+const parseWorkflowNodeDraft = (candidate: unknown, isRoot = false): WorkflowNodeDraft => {
+  if (!isRecord(candidate)) {
+    throw new Error('workflow_filter 노드는 JSON object여야 합니다.')
+  }
+
+  const hasAnd = Array.isArray(candidate.and)
+  const hasOr = Array.isArray(candidate.or)
+
+  if (hasAnd || hasOr || 'and' in candidate || 'or' in candidate) {
+    if (hasAnd && hasOr) {
+      throw new Error('workflow_filter 그룹 노드는 and와 or를 동시에 가질 수 없습니다.')
+    }
+
+    const groupType: WorkflowGroupType | null = hasAnd ? 'and' : hasOr ? 'or' : null
+    if (!groupType) {
+      throw new Error(
+        isRoot
+          ? 'workflow_filter 루트는 and 또는 or 그룹이어야 합니다.'
+          : 'workflow_filter 그룹 노드는 and 또는 or 중 하나를 가져야 합니다.',
+      )
+    }
+
+    if (Object.keys(candidate).length !== 1) {
+      throw new Error('workflow_filter 그룹 노드는 and 또는 or 키만 가질 수 있습니다.')
+    }
+
+    const rawChildren = candidate[groupType]
+    if (!Array.isArray(rawChildren)) {
+      throw new Error(`workflow_filter의 ${groupType} 값은 배열이어야 합니다.`)
+    }
+    if (rawChildren.length === 0) {
+      throw new Error(`workflow_filter의 ${groupType} 그룹은 비어 있을 수 없습니다.`)
+    }
+
+    return {
+      id: createEditorId(),
+      nodeType: 'group',
+      groupType,
+      children: rawChildren.map((child) => parseWorkflowNodeDraft(child)),
+    }
+  }
+
+  if (isRoot) {
+    throw new Error('workflow_filter 루트는 and 또는 or 그룹이어야 합니다.')
+  }
+
+  return parseWorkflowConditionDraft(candidate)
+}
+
+const parseActionDataIndexFieldDraft = (
+  fieldName: string,
+  candidate: unknown,
+): ActionDataIndexFieldDraft => {
+  if (typeof candidate === 'string') {
+    return {
+      id: createEditorId(),
+      fieldName,
+      from: 'data',
+      path: parseRelativePath(
+        candidate,
+        `action_data_index 필드 ${fieldName}의 path는 from 기준 상대 경로여야 합니다.`,
+      ),
+      transforms: [],
+    }
+  }
+
+  if (!isRecord(candidate)) {
+    throw new Error(`action_data_index 필드 ${fieldName}는 문자열 또는 object여야 합니다.`)
+  }
+
+  validateAllowedKeys(
+    candidate,
+    ACTION_DATA_INDEX_FIELD_KEYS,
+    `action_data_index 필드 ${fieldName}에는 from, path, transforms만 허용됩니다.`,
+  )
+
+  return {
+    id: createEditorId(),
+    fieldName,
+    from: parseLookupSource(
+      candidate.from,
+      `action_data_index 필드 ${fieldName}의 from은 data 또는 metadata만 허용됩니다.`,
+    ),
+    path: parseRelativePath(
+      candidate.path,
+      `action_data_index 필드 ${fieldName}의 path는 from 기준 상대 경로여야 합니다.`,
+    ),
+    transforms: parseTransforms(
+      candidate.transforms,
+      `action_data_index 필드 ${fieldName}의 transforms는 배열이어야 합니다.`,
+    ),
+  }
+}
+
+const serializeWorkflowNode = (node: WorkflowNodeDraft): Record<string, unknown> | null => {
+  if (node.nodeType === 'group') {
+    const children = node.children
+      .map((child) => serializeWorkflowNode(child))
+      .filter((child): child is Record<string, unknown> => child !== null)
+
+    if (children.length === 0) {
+      return null
+    }
+
+    return {
+      [node.groupType]: children,
+    }
+  }
+
+  const transforms = serializeTransforms(node.transforms)
+  const hasMeaningfulInput =
+    normalizeText(node.path).length > 0 ||
+    normalizeText(node.expectedText).length > 0 ||
+    transforms.length > 0
+
+  if (!hasMeaningfulInput) {
+    return null
+  }
+
+  const serializedCondition: Record<string, unknown> = {
+    from: node.from,
+    path: normalizeText(node.path),
+    comparison: node.comparison,
+  }
+
+  const parsedExpected = parseEditorLiteral(node.expectedText)
+  if (parsedExpected !== undefined) {
+    serializedCondition.expected = parsedExpected
+  }
+
+  if (transforms.length > 0) {
+    serializedCondition.transforms = transforms
+  }
+
+  return serializedCondition
+}
+
+const createStructuredRootGroup = (): WorkflowGroupDraft => ({
+  id: createEditorId(),
+  nodeType: 'group',
+  groupType: 'and',
+  children: [createEmptyWorkflowFilterCondition()],
+})
+
+export const createTransformDraft = (value = ''): TransformDraft => ({
+  id: createEditorId(),
+  value,
+})
+
+export const createEmptyWorkflowFilterCondition = (): WorkflowConditionDraft => ({
+  id: createEditorId(),
+  nodeType: 'condition',
+  from: 'data',
+  path: '',
+  comparison: 'equals',
+  expectedText: '',
+  transforms: [],
+})
+
+export const createEmptyWorkflowGroup = (
+  groupType: WorkflowGroupType = 'and',
+): WorkflowGroupDraft => ({
+  id: createEditorId(),
+  nodeType: 'group',
+  groupType,
+  children: [createEmptyWorkflowFilterCondition()],
 })
 
 export const createEmptyActionDataIndexField = (): ActionDataIndexFieldDraft => ({
-  id: createEditorRowId(),
+  id: createEditorId(),
   fieldName: '',
-  variableName: '',
-  source: 'AUTO',
-  transformsText: '',
-  fixedValue: '',
-  required: true,
+  from: 'data',
+  path: '',
+  transforms: [],
 })
 
 export const parseWorkflowFilterEditor = (value: string): WorkflowFilterEditorDraft => {
   const rawValue = value ?? ''
-  const parsed = parseRawJsonObject(rawValue)
+  const normalized = rawValue.trim()
 
-  if (parsed === null) {
+  if (!normalized) {
     return {
-      mode: rawValue.trim().length > 0 ? 'raw' : 'structured',
+      mode: 'structured',
       rawValue,
-      rows: [createEmptyWorkflowFilterCondition()],
+      rootGroup: createStructuredRootGroup(),
     }
   }
 
-  const candidateRows = Array.isArray(parsed.rows)
-    ? parsed.rows
-    : Array.isArray(parsed.conditions)
-      ? parsed.conditions
-      : parsed && Object.keys(parsed).length > 0
-        ? [parsed]
-        : []
+  const parsed = parseRawJsonObject(rawValue)
+  if (parsed === null) {
+    return {
+      mode: 'raw',
+      rawValue,
+      rootGroup: createStructuredRootGroup(),
+    }
+  }
 
-  const rows = candidateRows
-    .map((item) => {
-      if (!item || typeof item !== 'object') {
-        return null
-      }
+  try {
+    const rootGroup = parseWorkflowNodeDraft(parsed, true)
+    if (rootGroup.nodeType !== 'group') {
+      throw new Error('workflow_filter 루트는 and 또는 or 그룹이어야 합니다.')
+    }
 
-      const row = item as Record<string, unknown>
-      const expression =
-        row.left && typeof row.left === 'object'
-          ? (row.left as Record<string, unknown>)
-          : row.expr && typeof row.expr === 'object'
-            ? (row.expr as Record<string, unknown>)
-            : {}
-      const variable =
-        expression.var && typeof expression.var === 'object'
-          ? (expression.var as Record<string, unknown>)
-          : {}
-      const operatorCandidate =
-        typeof row.op === 'string'
-          ? row.op
-          : typeof row.operator === 'string'
-            ? row.operator
-            : 'eq'
-
-      return {
-        id: createEditorRowId(),
-        variableName: normalizeText(typeof variable.name === 'string' ? variable.name : ''),
-        source: normalizeSource(variable.source),
-        transformsText: splitTransforms(expression.xform).join(', '),
-        operator: FILTER_OPERATORS.includes(operatorCandidate as WorkflowFilterOperator)
-          ? (operatorCandidate as WorkflowFilterOperator)
-          : 'eq',
-        rightValue: stringifyRightValue(row.right),
-      }
-    })
-    .filter((item): item is WorkflowFilterConditionDraft => item !== null)
-
-  return {
-    mode: 'structured',
-    rawValue,
-    rows: rows.length > 0 ? rows : [createEmptyWorkflowFilterCondition()],
+    return {
+      mode: 'structured',
+      rawValue,
+      rootGroup,
+    }
+  } catch {
+    return {
+      mode: 'raw',
+      rawValue,
+      rootGroup: createStructuredRootGroup(),
+    }
   }
 }
 
@@ -193,120 +532,68 @@ export const buildWorkflowFilterValue = (draft: WorkflowFilterEditorDraft): stri
     return draft.rawValue.trim()
   }
 
-  const rows = draft.rows
-    .map((row) => {
-      const variableName = normalizeText(row.variableName)
-      if (!variableName) {
-        return null
-      }
-
-      const transforms = splitTransforms(row.transformsText)
-      const normalizedRight = normalizeText(row.rightValue)
-      const rightValue =
-        row.operator === 'in'
-          ? normalizedRight
-              .split(',')
-              .map((item) => item.trim())
-              .filter((item) => item.length > 0)
-          : normalizedRight
-
-      return {
-        left: {
-          var: {
-            name: variableName,
-            ...(row.source === 'AUTO' ? {} : { source: row.source }),
-          },
-          ...(transforms.length > 0 ? { xform: transforms } : {}),
-        },
-        op: row.operator,
-        ...(Array.isArray(rightValue)
-          ? { right: rightValue }
-          : rightValue
-            ? { right: rightValue }
-            : {}),
-      }
-    })
-    .filter(isNonNull)
-
-  if (rows.length === 0) {
+  const rootGroup = serializeWorkflowNode(draft.rootGroup)
+  if (!rootGroup) {
     return ''
   }
 
-  return JSON.stringify({ rows }, null, 2)
+  return JSON.stringify(rootGroup, null, 2)
 }
 
 export const parseActionDataIndexEditor = (value: string): ActionDataIndexEditorDraft => {
   const rawValue = value ?? ''
-  const parsed = parseRawJsonObject(rawValue)
+  const normalized = rawValue.trim()
 
-  if (parsed === null) {
-    const normalizedRawValue = normalizeText(rawValue)
+  if (!normalized) {
     return {
       mode: 'structured',
       rawValue,
-      messageName: normalizedRawValue,
+      mdfTemplateName: '',
       fields: [createEmptyActionDataIndexField()],
     }
   }
 
-  const fieldsSource =
-    parsed.fields && typeof parsed.fields === 'object' && !Array.isArray(parsed.fields)
-      ? (parsed.fields as Record<string, unknown>)
-      : parsed
+  const parsed = parseRawJsonObject(rawValue)
+  if (parsed === null) {
+    return {
+      mode: 'raw',
+      rawValue,
+      mdfTemplateName: '',
+      fields: [createEmptyActionDataIndexField()],
+    }
+  }
 
-  const fields = Object.entries(fieldsSource)
-    .filter(([fieldName]) => !DATA_INDEX_RESERVED_KEYS.has(fieldName))
-    .map(([fieldName, fieldValue]) => {
-      if (typeof fieldValue === 'string') {
-        return {
-          id: createEditorRowId(),
-          fieldName,
-          variableName: fieldValue,
-          source: 'AUTO' as ModelVariableSource,
-          transformsText: '',
-          fixedValue: '',
-          required: true,
-        }
-      }
+  try {
+    validateAllowedKeys(
+      parsed,
+      ACTION_DATA_INDEX_ROOT_KEYS,
+      'action_data_index 루트에는 mdfTemplateName, fields만 허용됩니다.',
+    )
 
-      if (fieldValue && typeof fieldValue === 'object' && !Array.isArray(fieldValue)) {
-        const fieldObject = fieldValue as Record<string, unknown>
-        return {
-          id: createEditorRowId(),
-          fieldName,
-          variableName: normalizeText(typeof fieldObject.var === 'string' ? fieldObject.var : ''),
-          source: normalizeSource(fieldObject.source),
-          transformsText: splitTransforms(fieldObject.xform).join(', '),
-          fixedValue: normalizeText(typeof fieldObject.fixed === 'string' ? fieldObject.fixed : ''),
-          required:
-            typeof fieldObject.required === 'boolean' ? fieldObject.required : true,
-        }
-      }
+    const fieldsValue = parsed.fields
+    if (!isRecord(fieldsValue)) {
+      throw new Error('action_data_index의 fields는 JSON object여야 합니다.')
+    }
 
-      return {
-        id: createEditorRowId(),
-        fieldName,
-        variableName: '',
-        source: 'AUTO' as ModelVariableSource,
-        transformsText: '',
-        fixedValue: '',
-        required: true,
-      }
-    })
+    const fields = Object.entries(fieldsValue).map(([fieldName, candidate]) =>
+      parseActionDataIndexFieldDraft(fieldName, candidate),
+    )
 
-  return {
-    mode: 'structured',
-    rawValue,
-    messageName: normalizeText(
-      typeof parsed.mdf === 'string'
-        ? parsed.mdf
-        : typeof parsed.messageName === 'string'
-          ? parsed.messageName
-          : typeof parsed.message === 'string'
-            ? parsed.message
-            : '',
-    ),
-    fields: fields.length > 0 ? fields : [createEmptyActionDataIndexField()],
+    return {
+      mode: 'structured',
+      rawValue,
+      mdfTemplateName: normalizeText(
+        typeof parsed.mdfTemplateName === 'string' ? parsed.mdfTemplateName : '',
+      ),
+      fields: fields.length > 0 ? fields : [createEmptyActionDataIndexField()],
+    }
+  } catch {
+    return {
+      mode: 'raw',
+      rawValue,
+      mdfTemplateName: '',
+      fields: [createEmptyActionDataIndexField()],
+    }
   }
 }
 
@@ -321,93 +608,69 @@ export const buildActionDataIndexValue = (draft: ActionDataIndexEditorDraft): st
       return accumulator
     }
 
-    const fixedValue = normalizeText(field.fixedValue)
-    if (fixedValue) {
-      accumulator[fieldName] = { fixed: fixedValue }
-      return accumulator
+    const serializedField: Record<string, unknown> = {
+      from: field.from,
+      path: normalizeText(field.path),
     }
 
-    const variableName = normalizeText(field.variableName)
-    if (!variableName) {
-      return accumulator
+    const transforms = serializeTransforms(field.transforms)
+    if (transforms.length > 0) {
+      serializedField.transforms = transforms
     }
 
-    const transforms = splitTransforms(field.transformsText)
-    accumulator[fieldName] = {
-      var: variableName,
-      ...(field.source === 'AUTO' ? {} : { source: field.source }),
-      ...(transforms.length > 0 ? { xform: transforms } : {}),
-      ...(field.required ? {} : { required: false }),
-    }
+    accumulator[fieldName] = serializedField
     return accumulator
   }, {})
 
-  if (Object.keys(fields).length === 0 && !normalizeText(draft.messageName)) {
+  const normalizedTemplateName = normalizeText(draft.mdfTemplateName)
+  if (!normalizedTemplateName && Object.keys(fields).length === 0) {
     return ''
   }
 
-  if (Object.keys(fields).length === 0 && normalizeText(draft.messageName)) {
-    return normalizeText(draft.messageName)
+  const serializedRoot: Record<string, unknown> = {
+    fields,
   }
 
-  return JSON.stringify(
-    {
-      ...(normalizeText(draft.messageName) ? { mdf: normalizeText(draft.messageName) } : {}),
-      fields,
-    },
-    null,
-    2,
-  )
+  if (normalizedTemplateName) {
+    serializedRoot.mdfTemplateName = normalizedTemplateName
+  }
+
+  return JSON.stringify(serializedRoot, null, 2)
 }
 
 export const summarizeWorkflowFilterValue = (value: string): string => {
-  const normalized = value.trim()
-  if (!normalized) {
+  const fallback = normalizeFirstLine(value)
+  if (!fallback) {
     return ''
   }
 
-  const parsed = parseRawJsonObject(normalized)
-  if (parsed === null) {
-    return normalized.split(/\r?\n/, 1)[0] ?? ''
+  const editor = parseWorkflowFilterEditor(value)
+  if (editor.mode === 'raw') {
+    return fallback
   }
 
-  const editor = parseWorkflowFilterEditor(normalized)
-  const firstRow = editor.rows.find((row) => normalizeText(row.variableName))
-  if (!firstRow) {
-    return normalized.split(/\r?\n/, 1)[0] ?? ''
-  }
-
-  const transforms = splitTransforms(firstRow.transformsText)
-  const transformText = transforms.length > 0 ? ` | ${transforms.join(' | ')}` : ''
-  const rightText = normalizeText(firstRow.rightValue)
-  return `${firstRow.variableName}[${firstRow.source}]${transformText} ${firstRow.operator}${rightText ? ` ${rightText}` : ''}`
+  return summarizeWorkflowNode(editor.rootGroup)
 }
 
 export const summarizeActionDataIndexValue = (value: string): string => {
-  const normalized = value.trim()
-  if (!normalized) {
+  const fallback = normalizeFirstLine(value)
+  if (!fallback) {
     return ''
   }
 
-  const parsed = parseRawJsonObject(normalized)
-  if (parsed === null) {
-    return normalized.split(/\r?\n/, 1)[0] ?? ''
+  const editor = parseActionDataIndexEditor(value)
+  if (editor.mode === 'raw') {
+    return fallback
   }
 
-  const editor = parseActionDataIndexEditor(normalized)
-  const firstField = editor.fields.find((field) => normalizeText(field.fieldName))
+  const firstField = editor.fields.find((field) => normalizeText(field.fieldName).length > 0)
   if (!firstField) {
-    return normalizeText(editor.messageName)
+    return editor.mdfTemplateName
+      ? `mdfTemplateName=${editor.mdfTemplateName} / fields=0`
+      : fallback
   }
 
-  const transforms = splitTransforms(firstField.transformsText)
-  const transformText = transforms.length > 0 ? ` | ${transforms.join(' | ')}` : ''
-  const sourceText = firstField.source === 'AUTO' ? '[AUTO]' : `[${firstField.source}]`
-  const messageText = normalizeText(editor.messageName)
-
-  if (normalizeText(firstField.fixedValue)) {
-    return `${messageText ? `${messageText} / ` : ''}${firstField.fieldName} = ${firstField.fixedValue}`
-  }
-
-  return `${messageText ? `${messageText} / ` : ''}${firstField.fieldName} <- ${firstField.variableName}${sourceText}${transformText}${firstField.required ? '' : ' | optional'}`
+  return summarizeActionField(firstField.fieldName.trim(), firstField, editor.mdfTemplateName)
 }
+
+export { LOOKUP_SOURCE_OPTIONS, WORKFLOW_COMPARISON_OPTIONS }

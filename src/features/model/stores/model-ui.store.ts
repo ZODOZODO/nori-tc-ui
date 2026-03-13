@@ -1,9 +1,16 @@
 import { create } from 'zustand'
+import {
+  clampSidebarWidth,
+  SIDEBAR_COLLAPSED_WIDTH_PX,
+  SIDEBAR_DEFAULT_WIDTH_PX,
+} from '@/shared/layout/sidebar-layout'
 import type { ModelDetailNode, ModelInfo, ModelOpenedTab } from '../types/model.types'
 
 interface ModelUiState {
   selectedModelVersionKey: number | null
   sidebarOpen: boolean
+  sidebarWidth: number
+  expandedSidebarWidth: number
   openedTabs: ModelOpenedTab[]
   activeTab: number | null
   detailNode: ModelDetailNode | null
@@ -13,6 +20,9 @@ interface ModelUiState {
   isProfileModalOpen: boolean
   setSelectedModelVersionKey: (modelVersionKey: number | null) => void
   setSidebarOpen: (open: boolean) => void
+  setSidebarWidth: (width: number) => void
+  expandSidebar: () => void
+  collapseSidebar: () => void
   toggleSidebar: () => void
   openModelTab: (model: ModelInfo) => void
   closeModelTab: (modelVersionKey: number) => void
@@ -50,6 +60,8 @@ const toOpenedTab = (model: ModelInfo): ModelOpenedTab => ({
 export const useModelUiStore = create<ModelUiState>((set) => ({
   selectedModelVersionKey: null,
   sidebarOpen: true,
+  sidebarWidth: SIDEBAR_DEFAULT_WIDTH_PX,
+  expandedSidebarWidth: SIDEBAR_DEFAULT_WIDTH_PX,
   openedTabs: [],
   activeTab: null,
   detailNode: null,
@@ -58,8 +70,49 @@ export const useModelUiStore = create<ModelUiState>((set) => ({
   isCheckInModalOpen: false,
   isProfileModalOpen: false,
   setSelectedModelVersionKey: (modelVersionKey) => set({ selectedModelVersionKey: modelVersionKey }),
-  setSidebarOpen: (open) => set({ sidebarOpen: open }),
-  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+  setSidebarOpen: (open) =>
+    set((state) =>
+      open
+        ? {
+            sidebarOpen: true,
+            sidebarWidth: clampSidebarWidth(state.expandedSidebarWidth),
+          }
+        : {
+            sidebarOpen: false,
+            sidebarWidth: SIDEBAR_COLLAPSED_WIDTH_PX,
+            expandedSidebarWidth: clampSidebarWidth(state.sidebarWidth),
+          },
+    ),
+  setSidebarWidth: (width) =>
+    set({
+      sidebarOpen: true,
+      sidebarWidth: clampSidebarWidth(width),
+      expandedSidebarWidth: clampSidebarWidth(width),
+    }),
+  expandSidebar: () =>
+    set((state) => ({
+      sidebarOpen: true,
+      sidebarWidth: clampSidebarWidth(state.expandedSidebarWidth),
+    })),
+  collapseSidebar: () =>
+    set((state) => ({
+      sidebarOpen: false,
+      sidebarWidth: SIDEBAR_COLLAPSED_WIDTH_PX,
+      expandedSidebarWidth: clampSidebarWidth(state.sidebarWidth),
+    })),
+  toggleSidebar: () =>
+    set((state) =>
+      state.sidebarOpen
+        ? {
+            sidebarOpen: false,
+            sidebarWidth: SIDEBAR_COLLAPSED_WIDTH_PX,
+            expandedSidebarWidth: clampSidebarWidth(state.sidebarWidth),
+          }
+        : {
+            sidebarOpen: true,
+            sidebarWidth: clampSidebarWidth(state.expandedSidebarWidth),
+          },
+    ),
   openModelTab: (model) =>
     set((state) => {
       const tab = toOpenedTab(model)
@@ -212,6 +265,8 @@ export const useModelUiStore = create<ModelUiState>((set) => ({
     set({
       selectedModelVersionKey: null,
       sidebarOpen: true,
+      sidebarWidth: SIDEBAR_DEFAULT_WIDTH_PX,
+      expandedSidebarWidth: SIDEBAR_DEFAULT_WIDTH_PX,
       openedTabs: [],
       activeTab: null,
       detailNode: null,

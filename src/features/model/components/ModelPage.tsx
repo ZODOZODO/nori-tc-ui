@@ -7,6 +7,7 @@ import { authApi } from '@/features/auth/api/auth.api'
 import { UserProfileModal } from '@/features/profile/components/UserProfileModal'
 import { useMe } from '@/features/profile/hooks/useProfile'
 import { ResizableDivider } from '@/features/eqp/components/ResizableDivider'
+import { clampSidebarWidth } from '@/shared/layout/sidebar-layout'
 import { useModelDetail } from '../hooks/useModelDetail'
 import { useModelDetailMutations } from '../hooks/useModelDetailMutations'
 import { useModelList } from '../hooks/useModelList'
@@ -41,8 +42,6 @@ const LOGIN_ROUTE = '/login'
 const CSRF_COOKIE_NAME = 'XSRF-TOKEN'
 const HEADER_HORIZONTAL_PADDING_PX = 20
 const CONTENT_START_PADDING_PX = 16
-const SIDEBAR_EXPANDED_WIDTH_PX = 240
-const SIDEBAR_COLLAPSED_WIDTH_PX = 56
 
 // ResizableDivider 크기 제한 (%)
 const PANEL_MIN_PERCENT = 15
@@ -156,6 +155,7 @@ export function ModelPage() {
 
   const selectedModelVersionKey = useModelUiStore((state) => state.selectedModelVersionKey)
   const sidebarOpen = useModelUiStore((state) => state.sidebarOpen)
+  const sidebarWidth = useModelUiStore((state) => state.sidebarWidth)
   const openedTabs = useModelUiStore((state) => state.openedTabs)
   const activeTab = useModelUiStore((state) => state.activeTab)
   const detailNode = useModelUiStore((state) => state.detailNode)
@@ -165,6 +165,7 @@ export function ModelPage() {
   const isProfileModalOpen = useModelUiStore((state) => state.isProfileModalOpen)
   const setSelectedModelVersionKey = useModelUiStore((state) => state.setSelectedModelVersionKey)
   const toggleSidebar = useModelUiStore((state) => state.toggleSidebar)
+  const setSidebarWidth = useModelUiStore((state) => state.setSidebarWidth)
   const openModelTab = useModelUiStore((state) => state.openModelTab)
   const closeModelTab = useModelUiStore((state) => state.closeModelTab)
   const setActiveTab = useModelUiStore((state) => state.setActiveTab)
@@ -304,6 +305,10 @@ export function ModelPage() {
   }, [activeTab, modelItems])
 
   const detailNodeQuery = useModelNodeDetail(activeTabModel?.modelVersionKey ?? null, detailNode)
+  const workflowMdfQuery = useModelNodeDetail(
+    activeTabModel?.modelVersionKey ?? null,
+    activeTabModel && detailNode !== 'mdf' ? 'mdf' : null,
+  )
 
   const editModelForActiveGroup = useMemo(() => {
     if (!activeTabModel) {
@@ -421,6 +426,28 @@ export function ModelPage() {
   }, [activeTabModel, detailNode, detailNodeQuery.data])
 
   /**
+   * workflow editor의 MDF template select가 현재 model의 MDF 목록을 항상 사용할 수 있도록
+   * 별도 MDF detail 응답도 캐시에 적재합니다.
+   */
+  useEffect(() => {
+    if (!activeTabModel || !workflowMdfQuery.data) {
+      return
+    }
+
+    const mdfContextKey = `${activeTabModel.modelVersionKey}:mdf`
+    setDetailMdfByContext((previousMdfByContext) => {
+      if (previousMdfByContext[mdfContextKey]) {
+        return previousMdfByContext
+      }
+
+      return {
+        ...previousMdfByContext,
+        [mdfContextKey]: workflowMdfQuery.data.mdfContents,
+      }
+    })
+  }, [activeTabModel, workflowMdfQuery.data])
+
+  /**
    * 활성 탭이 EDIT 모델인지/소유자인지에 따라 편집 모드를 동기화합니다.
    */
   useEffect(() => {
@@ -486,6 +513,17 @@ export function ModelPage() {
     })
   }, [])
 
+  const handleSidebarDrag = useCallback(
+    (deltaX: number) => {
+      if (!sidebarOpen) {
+        return
+      }
+
+      setSidebarWidth(clampSidebarWidth(sidebarWidth + deltaX))
+    },
+    [setSidebarWidth, sidebarOpen, sidebarWidth],
+  )
+
   const detailContextKey = useMemo(() => {
     if (!activeTabModel || !detailNode) {
       return null
@@ -513,6 +551,15 @@ export function ModelPage() {
     }
     return detailMdfByContext[detailContextKey] ?? detailNodeQuery.data?.mdfContents ?? []
   }, [detailContextKey, detailMdfByContext, detailNodeQuery.data?.mdfContents])
+
+  const workflowMdfContents = useMemo(() => {
+    if (!activeTabModel) {
+      return []
+    }
+
+    const mdfContextKey = `${activeTabModel.modelVersionKey}:mdf`
+    return workflowMdfQuery.data?.mdfContents ?? detailMdfByContext[mdfContextKey] ?? []
+  }, [activeTabModel, detailMdfByContext, workflowMdfQuery.data?.mdfContents])
 
   const hasDetailData = detailRows.length > 0 || detailMdfContents.length > 0
   const detailLoadErrorMessage =
@@ -1014,6 +1061,21 @@ export function ModelPage() {
       return
     }
 
+    const fallbackModel = sortByUpdatedAtDesc(
+      modelItems.filter(
+        (item) =>
+          item.modelKey === activeTabModel.modelKey &&
+          item.modelVersion.trim().toUpperCase() !== 'EDIT',
+      ),
+    )[0]
+
+    if (!fallbackModel) {
+      setCheckInErrorMessage(
+        '현재 branch에 checkout 이전 버전이 없어 Undo를 수행할 수 없습니다. branch baseline을 먼저 확인해 주세요.',
+      )
+      return
+    }
+
     try {
       setCheckInErrorMessage(null)
       await deleteModelMutation.mutateAsync({
@@ -1021,14 +1083,6 @@ export function ModelPage() {
       })
 
       closeModelTab(activeTabModel.modelVersionKey)
-
-      const fallbackModel = sortByUpdatedAtDesc(
-        modelItems.filter(
-          (item) =>
-            item.modelKey === activeTabModel.modelKey &&
-            item.modelVersion.trim().toUpperCase() !== 'EDIT',
-        ),
-      )[0]
 
       if (fallbackModel) {
         openModelTab(fallbackModel)
@@ -1117,9 +1171,8 @@ export function ModelPage() {
     : null
 
   const isVersionFrame = activeTab !== null && openedTabs.length > 0
-  const topNavigationOffsetPx = sidebarOpen
-    ? SIDEBAR_EXPANDED_WIDTH_PX + CONTENT_START_PADDING_PX - HEADER_HORIZONTAL_PADDING_PX
-    : SIDEBAR_COLLAPSED_WIDTH_PX + CONTENT_START_PADDING_PX - HEADER_HORIZONTAL_PADDING_PX
+  const topNavigationOffsetPx =
+    sidebarWidth + CONTENT_START_PADDING_PX - HEADER_HORIZONTAL_PADDING_PX
 
   const handleNavigateMenu = (route: string | null) => {
     if (!route || route === '/model') {
@@ -1203,6 +1256,7 @@ export function ModelPage() {
           modelItems={modelItems}
           selectedModelVersionKey={selectedModelVersionKey}
           sidebarOpen={sidebarOpen}
+          sidebarWidth={sidebarWidth}
           isLoading={modelListQuery.isLoading}
           errorMessage={listErrorMessage}
           onSelectModel={handleSelectModel}
@@ -1220,6 +1274,7 @@ export function ModelPage() {
           isBranchCommitDisabled={isBranchCommitDisabled}
           isBranchDeleteDisabled={isBranchDeleteDisabled}
           onToggleSidebar={toggleSidebar}
+          onResizeSidebar={handleSidebarDrag}
         />
 
         <section className="flex min-w-0 flex-1 flex-col">
@@ -1268,6 +1323,7 @@ export function ModelPage() {
                     detailColumns={detailColumns}
                     detailRows={detailRows}
                     mdfContents={detailMdfContents}
+                    workflowMdfContents={workflowMdfContents}
                     isDetailLoading={detailNodeQuery.isLoading}
                     detailErrorMessage={detailLoadErrorMessage}
                     isEditMode={isEditMode}

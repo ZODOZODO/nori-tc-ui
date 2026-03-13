@@ -56,7 +56,6 @@ function RecoveryModal({ type, onClose }: RecoveryModalProps) {
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center bg-[#00000033] px-4"
-      onClick={onClose}
       role="presentation"
     >
       <div
@@ -64,7 +63,6 @@ function RecoveryModal({ type, onClose }: RecoveryModalProps) {
         aria-modal="true"
         aria-labelledby={`${type}-title`}
         className="w-full max-w-[520px] rounded-[20px] border border-[#DDE5DF] bg-white p-6"
-        onClick={(event) => event.stopPropagation()}
       >
         <div className="flex flex-col gap-[18px]">
           <div className="flex items-center gap-3">
