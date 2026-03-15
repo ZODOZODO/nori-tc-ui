@@ -173,8 +173,8 @@ export function ParentModelCommitModal({
         }
       }}
     >
-      <DialogContent className="max-h-[92vh] w-[96vw] max-w-[1480px] overflow-hidden p-0">
-        <div className="flex min-h-0 max-h-[92vh] flex-col">
+      <DialogContent className="!left-4 !right-4 !top-4 !bottom-4 !w-auto !max-w-none !translate-x-0 !translate-y-0 overflow-hidden p-0">
+        <div className="flex h-full min-h-0 flex-col">
           <DialogHeader className="border-b border-[#EEF3F0] px-6 py-5">
             <DialogTitle>Parent Model Commit</DialogTitle>
             <DialogDescription>
