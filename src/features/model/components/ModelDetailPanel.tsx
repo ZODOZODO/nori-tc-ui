@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useModelNodeDetail } from '../hooks/useModelNodeDetail'
 import { Loader2, MoreHorizontal, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -55,6 +56,16 @@ import {
 
 const WORKFLOW_MODAL_EDITABLE_COLUMNS = new Set(['filter', 'data index'])
 const EMPTY_MDF_TEMPLATE_VALUE = '__empty__'
+
+/**
+ * workflow 노드에서 Filter/Data Index/Action Name 컬럼은 너비를 고정하여
+ * Filter 적용 시 다른 컬럼이 압박되는 현상을 방지합니다.
+ */
+const WORKFLOW_COLUMN_FIXED_CLASS: Record<string, string> = {
+  Filter: 'w-[180px] min-w-[180px] max-w-[180px]',
+  'Data Index': 'w-[180px] min-w-[180px] max-w-[180px]',
+  'Action Name': 'w-[180px] min-w-[180px] max-w-[180px]',
+}
 
 interface WorkflowTextEditorState {
   rowId: string
@@ -127,6 +138,37 @@ const isFilterColumn = (columnName: string | undefined): boolean =>
 
 const isDataIndexColumn = (columnName: string | undefined): boolean =>
   (columnName ?? '').trim().toLowerCase() === 'data index'
+
+const isMessageNameColumn = (columnName: string | undefined): boolean =>
+  (columnName ?? '').trim().toLowerCase() === 'message name'
+
+const isEventIdColumn = (columnName: string | undefined): boolean =>
+  (columnName ?? '').trim().toLowerCase() === 'eventid'
+
+const isDcopWorkflowNameColumn = (columnName: string | undefined): boolean =>
+  (columnName ?? '').trim() === 'Workflow Name'
+
+const isDcopCollectionRuleColumn = (columnName: string | undefined): boolean =>
+  (columnName ?? '').trim() === 'Collection Rule'
+
+/** dcop-itemes의 Collection Rule 선택 옵션 (기본값: LAST) */
+const DCOP_COLLECTION_RULE_OPTIONS = ['LAST', 'FIRST', 'AVERAGE', 'MIN', 'MAX'] as const
+
+/**
+ * workflow 테이블에서 Workflow Name(첫 번째 컬럼) 입력값이 다른 행에 중복되는지 확인합니다.
+ *
+ * @param value 현재 입력값
+ * @param rowId 현재 row의 id (자기 자신 제외용)
+ * @param allRows 전체 row 목록
+ * @returns 중복이 있으면 true
+ */
+const hasDuplicateWorkflowName = (value: string, rowId: string, allRows: ModelDetailRow[]): boolean => {
+  const normalized = value.trim()
+  if (!normalized) {
+    return false
+  }
+  return allRows.some((other) => other.id !== rowId && (other.values[0] ?? '').trim() === normalized)
+}
 
 const resolveWorkflowPreviewValue = (row: ModelDetailRow, columnIndex: number, columnName: string): string => {
   const storedPreview = row.previewValues[columnIndex]?.trim()
@@ -581,6 +623,8 @@ export function ModelDetailPanel({
   const normalizedDetailNode = detailNode ?? detailNodes[0] ?? null
   const normalizedDetailColumns = detailColumns.length > 0 ? detailColumns : ['Value']
   const isMdfNode = normalizedDetailNode === 'mdf'
+  const isWorkflowNode = normalizedDetailNode === 'workflow'
+  const isDcopItemsNode = normalizedDetailNode === 'dcop-itemes'
   const isBranchModel = Boolean(activeModel?.parentModel?.trim())
   const isDeprecatedBranch =
     isBranchModel && activeModel?.status.trim().toUpperCase() === 'DEPRECATED'
@@ -588,6 +632,48 @@ export function ModelDetailPanel({
   const isWorkflowEditorOpen =
     workflowTextEditor !== null && !isReadOnly && normalizedDetailNode === 'workflow'
   const canEditTableRows = !isReadOnly && !isMdfNode
+
+  // SOCKET 모델 여부 판단
+  const isSocketModel = activeModel?.commInterface?.toUpperCase() === 'SOCKET'
+
+  // workflow 편집 시 Message Name 정합성을 위해 secs-message / socket-message 데이터를 조회합니다.
+  // (읽기 전용 상태에서는 불필요하므로 edit 모드일 때만 활성화)
+  const workflowMessageDetailNode = isSocketModel ? 'socket-message' : 'secs-message'
+  const workflowMessageQuery = useModelNodeDetail(
+    isWorkflowNode && !isReadOnly ? (activeModel?.modelVersionKey ?? null) : null,
+    workflowMessageDetailNode,
+  )
+  // message 이름 컬럼은 첫 번째 컬럼 ('SECS Message Name' 또는 'Socket Message Name')
+  const workflowMessageOptions = useMemo(
+    () => workflowMessageQuery.data?.rows.map((row) => row.values[0] ?? '').filter(Boolean) ?? [],
+    [workflowMessageQuery.data?.rows],
+  )
+
+  // SECS 모델 workflow / dcop-itemes 편집 시 EventId 정합성을 위해 eventides 데이터를 조회합니다.
+  // (SOCKET 모델이거나 읽기 전용 상태에서는 조회하지 않음)
+  const workflowEventIdQuery = useModelNodeDetail(
+    (isWorkflowNode || isDcopItemsNode) && !isReadOnly && !isSocketModel
+      ? (activeModel?.modelVersionKey ?? null)
+      : null,
+    'eventides',
+  )
+  // EventId 컬럼은 eventides의 첫 번째 컬럼
+  const workflowEventIdOptions = useMemo(
+    () => workflowEventIdQuery.data?.rows.map((row) => row.values[0] ?? '').filter(Boolean) ?? [],
+    [workflowEventIdQuery.data?.rows],
+  )
+
+  // dcop-itemes 편집 시 Workflow Name 정합성을 위해 workflow 데이터를 조회합니다.
+  // (읽기 전용 상태에서는 불필요하므로 edit 모드일 때만 활성화)
+  const dcopWorkflowQuery = useModelNodeDetail(
+    isDcopItemsNode && !isReadOnly ? (activeModel?.modelVersionKey ?? null) : null,
+    'workflow',
+  )
+  // Workflow Name 컬럼은 workflow의 첫 번째 컬럼
+  const dcopWorkflowNameOptions = useMemo(
+    () => dcopWorkflowQuery.data?.rows.map((row) => row.values[0] ?? '').filter(Boolean) ?? [],
+    [dcopWorkflowQuery.data?.rows],
+  )
 
   const hintText = !activeModel
     ? '모델을 선택해 주세요.'
@@ -611,8 +697,22 @@ export function ModelDetailPanel({
     isCheckinPending ||
     !isEditMode ||
     isLockedByOtherUser
+  // workflow 노드에서 Workflow Name 중복이 있으면 저장을 차단합니다.
+  const hasWorkflowNameDuplicate = useMemo(() => {
+    if (!isWorkflowNode) {
+      return false
+    }
+    const names = detailRows.map((row) => (row.values[0] ?? '').trim()).filter(Boolean)
+    return names.length !== new Set(names).size
+  }, [isWorkflowNode, detailRows])
+
   const saveDisabled =
-    isDetailLoading || isDetailSavePending || !isEditMode || isLockedByOtherUser || isMdfNode
+    isDetailLoading ||
+    isDetailSavePending ||
+    !isEditMode ||
+    isLockedByOtherUser ||
+    isMdfNode ||
+    hasWorkflowNameDuplicate
 
   const workflowEditorTitle = useMemo(() => {
     if (!workflowTextEditor) {
@@ -909,7 +1009,7 @@ export function ModelDetailPanel({
             ))}
           </aside>
 
-          <div className="min-h-0 flex-1 overflow-auto p-3">
+          <div className="min-h-0 min-w-0 flex-1 overflow-auto p-3">
             {isMdfNode ? (
               <div className="flex min-h-full flex-col space-y-3">
                 <input
@@ -963,12 +1063,17 @@ export function ModelDetailPanel({
                   ) : null}
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-auto">
+                <div className="min-h-0 min-w-0 flex-1 overflow-auto">
                   <Table className="min-w-[760px]">
                     <TableHeader>
                       <TableRow className="bg-[#F6F9F7]">
                         {normalizedDetailColumns.map((columnName) => (
-                          <TableHead key={columnName}>{columnName}</TableHead>
+                          <TableHead
+                            key={columnName}
+                            className={isWorkflowNode ? WORKFLOW_COLUMN_FIXED_CLASS[columnName] : undefined}
+                          >
+                            {columnName}
+                          </TableHead>
                         ))}
                         {canEditTableRows ? <TableHead className="w-[92px]">작업</TableHead> : null}
                       </TableRow>
@@ -1015,8 +1120,17 @@ export function ModelDetailPanel({
                                 ? resolveWorkflowPreviewValue(row, columnIndex, columnName)
                                 : rawValue
 
+                              // Workflow Name 중복 여부 (workflow 노드의 첫 번째 컬럼)
+                              const isDuplicate =
+                                isWorkflowNode &&
+                                columnIndex === 0 &&
+                                hasDuplicateWorkflowName(rawValue, row.id, detailRows)
+
                               return (
-                                <TableCell key={`${row.id}-${columnIndex}`}>
+                                <TableCell
+                                  key={`${row.id}-${columnIndex}`}
+                                  className={isWorkflowNode ? WORKFLOW_COLUMN_FIXED_CLASS[columnName] : undefined}
+                                >
                                   {isReadOnly ? (
                                     <span
                                       className={cn(
@@ -1057,13 +1171,120 @@ export function ModelDetailPanel({
                                         <MoreHorizontal className="size-3.5" />
                                       </button>
                                     </div>
+                                  ) : isWorkflowNode && isMessageNameColumn(columnName) ? (
+                                    // Message Name: secs-message / socket-message 목록 드롭다운
+                                    <select
+                                      value={rawValue}
+                                      onChange={(event) =>
+                                        onChangeDetailValue(row.id, columnIndex, event.target.value)
+                                      }
+                                      className="h-8 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+                                    >
+                                      <option value="">—</option>
+                                      {/* 현재 값이 목록에 없으면 fallback option으로 보존 */}
+                                      {rawValue && !workflowMessageOptions.includes(rawValue) && (
+                                        <option value={rawValue}>{rawValue}</option>
+                                      )}
+                                      {workflowMessageOptions.map((name) => (
+                                        <option key={name} value={name}>
+                                          {name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : isWorkflowNode && isEventIdColumn(columnName) ? (
+                                    // EventId: eventides 목록 드롭다운 (SECS 모델 전용)
+                                    <select
+                                      value={rawValue}
+                                      onChange={(event) =>
+                                        onChangeDetailValue(row.id, columnIndex, event.target.value)
+                                      }
+                                      className="h-8 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+                                    >
+                                      <option value="">—</option>
+                                      {/* 현재 값이 목록에 없으면 fallback option으로 보존 */}
+                                      {rawValue && !workflowEventIdOptions.includes(rawValue) && (
+                                        <option value={rawValue}>{rawValue}</option>
+                                      )}
+                                      {workflowEventIdOptions.map((id) => (
+                                        <option key={id} value={id}>
+                                          {id}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : isDcopItemsNode && isDcopWorkflowNameColumn(columnName) ? (
+                                    // dcop-itemes Workflow Name: workflow 목록 드롭다운
+                                    <select
+                                      value={rawValue}
+                                      onChange={(event) =>
+                                        onChangeDetailValue(row.id, columnIndex, event.target.value)
+                                      }
+                                      className="h-8 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+                                    >
+                                      <option value="">—</option>
+                                      {/* 현재 값이 목록에 없으면 fallback option으로 보존 */}
+                                      {rawValue && !dcopWorkflowNameOptions.includes(rawValue) && (
+                                        <option value={rawValue}>{rawValue}</option>
+                                      )}
+                                      {dcopWorkflowNameOptions.map((name) => (
+                                        <option key={name} value={name}>
+                                          {name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : isDcopItemsNode && isEventIdColumn(columnName) ? (
+                                    // dcop-itemes EventId: eventides 목록 드롭다운 (SECS 모델 전용)
+                                    <select
+                                      value={rawValue}
+                                      onChange={(event) =>
+                                        onChangeDetailValue(row.id, columnIndex, event.target.value)
+                                      }
+                                      className="h-8 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+                                    >
+                                      <option value="">—</option>
+                                      {/* 현재 값이 목록에 없으면 fallback option으로 보존 */}
+                                      {rawValue && !workflowEventIdOptions.includes(rawValue) && (
+                                        <option value={rawValue}>{rawValue}</option>
+                                      )}
+                                      {workflowEventIdOptions.map((id) => (
+                                        <option key={id} value={id}>
+                                          {id}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : isDcopItemsNode && isDcopCollectionRuleColumn(columnName) ? (
+                                    // dcop-itemes Collection Rule: LAST / FIRST / AVERAGE / MIN / MAX 선택
+                                    // 값이 없으면 기본값 LAST로 표시 (신규 행 추가 시 handleAddDetailRow에서도 LAST 주입)
+                                    <select
+                                      value={rawValue || 'LAST'}
+                                      onChange={(event) =>
+                                        onChangeDetailValue(row.id, columnIndex, event.target.value)
+                                      }
+                                      className="h-8 w-full rounded-md border border-[#DCE5E0] bg-white px-2 text-sm text-[#22322B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1C7F59]/30"
+                                    >
+                                      {DCOP_COLLECTION_RULE_OPTIONS.map((rule) => (
+                                        <option key={rule} value={rule}>
+                                          {rule}
+                                        </option>
+                                      ))}
+                                    </select>
                                   ) : (
+                                    // 일반 Input (Workflow Name은 중복 시 에러 표시)
                                     <Input
                                       value={rawValue}
                                       onChange={(event) =>
                                         onChangeDetailValue(row.id, columnIndex, event.target.value)
                                       }
-                                      className="h-8"
+                                      className={cn(
+                                        'h-8',
+                                        isDuplicate
+                                          ? 'border-[#C5534B] focus-visible:ring-[#C5534B]/30'
+                                          : null,
+                                      )}
+                                      title={
+                                        isDuplicate
+                                          ? '다른 행에 동일한 Workflow Name이 있습니다.'
+                                          : undefined
+                                      }
                                     />
                                   )}
                                 </TableCell>
@@ -1179,7 +1400,7 @@ export function ModelDetailPanel({
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="grid gap-4 rounded-2xl border border-[#E4EAE6] bg-[#FAFCFB] px-4 py-4 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)_auto]">
+                <div className="grid gap-4 rounded-2xl border border-[#E4EAE6] bg-[#FAFCFB] px-4 py-4 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
                   <div className="space-y-2.5">
                     <label className="text-xs font-semibold text-[#1E3D33]">MDF Message</label>
                     <Select
@@ -1238,21 +1459,26 @@ export function ModelDetailPanel({
                     </p>
                   </div>
 
-                  <div className="flex justify-start xl:justify-end xl:pt-7">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() =>
-                        setActionDataIndexDraft((previousDraft) => ({
-                          ...previousDraft,
-                          fields: [...previousDraft.fields, createEmptyActionDataIndexField()],
-                        }))
-                      }
-                    >
-                      <Plus className="size-3.5" aria-hidden="true" />
-                      field 추가
-                    </Button>
-                  </div>
+                </div>
+
+                {/* Fields 테이블 레이블 및 '+field 추가' 버튼 영역 */}
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-semibold text-[#1E3D33]">Fields</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 rounded-lg px-2 text-xs"
+                    onClick={() =>
+                      setActionDataIndexDraft((previousDraft) => ({
+                        ...previousDraft,
+                        fields: [...previousDraft.fields, createEmptyActionDataIndexField()],
+                      }))
+                    }
+                  >
+                    <Plus className="size-3" aria-hidden="true" />
+                    field 추가
+                  </Button>
                 </div>
 
                 <div className="max-h-[52vh] overflow-y-auto rounded-2xl border border-[#E4EAE6]">

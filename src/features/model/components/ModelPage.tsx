@@ -8,6 +8,7 @@ import { UserProfileModal } from '@/features/profile/components/UserProfileModal
 import { useMe } from '@/features/profile/hooks/useProfile'
 import { ResizableDivider } from '@/features/eqp/components/ResizableDivider'
 import { clampSidebarWidth } from '@/shared/layout/sidebar-layout'
+import { useSharedLayoutStore } from '@/shared/stores/shared-layout.store'
 import { useModelDetail } from '../hooks/useModelDetail'
 import { useModelDetailMutations } from '../hooks/useModelDetailMutations'
 import { useModelList } from '../hooks/useModelList'
@@ -21,12 +22,16 @@ import {
   SOCKET_DETAIL_NODES,
   type ModelDetailNode,
   type ModelDetailRow,
+  type ModelDiffItem,
+  type ModelDiffSection,
   type ModelMdfContent,
   type ModelInfo,
   type ModelParentCommitResult,
   type ProtocolType,
 } from '../types/model.types'
+import { modelApi } from '../api/model.api'
 import { BranchModelCreateModal } from './BranchModelCreateModal'
+import { ModelCheckInDiffModal } from './ModelCheckInDiffModal'
 import { ModelCheckInModal } from './ModelCheckInModal'
 import { ModelCreateOrUpdateModal } from './ModelCreateOrUpdateModal'
 import {
@@ -40,8 +45,6 @@ import { ParentModelCommitModal } from './ParentModelCommitModal'
 
 const LOGIN_ROUTE = '/login'
 const CSRF_COOKIE_NAME = 'XSRF-TOKEN'
-const HEADER_HORIZONTAL_PADDING_PX = 20
-const CONTENT_START_PADDING_PX = 16
 
 // ResizableDivider 크기 제한 (%)
 const PANEL_MIN_PERCENT = 15
@@ -89,6 +92,56 @@ const sortByUpdatedAtDesc = (models: ModelInfo[]): ModelInfo[] =>
     const firstTime = Date.parse(firstItem.updatedAt)
     return secondTime - firstTime
   })
+
+/**
+ * MDF 노드는 XML 비교가 의미 없으므로 diff 대상에서 제외합니다.
+ */
+const DIFF_EXCLUDED_NODES: ReadonlySet<ModelDetailNode> = new Set(['mdf'])
+
+/**
+ * 두 row 배열을 비교하여 추가/변경/삭제 항목을 도출합니다.
+ *
+ * identity 기준: values[0] (각 노드의 이름/식별 컬럼)이 비어 있으면 row.id 사용.
+ * branchValues = 현재 EDIT 버전 값, parentValues = 이전 저장 버전 값.
+ *
+ * @param currentRows  현재 EDIT 버전 rows
+ * @param previousRows 이전 버전 rows
+ * @returns added / changed / deleted 항목 배열
+ */
+const computeNodeDiff = (
+  currentRows: ModelDetailRow[],
+  previousRows: ModelDetailRow[],
+): Pick<ModelDiffSection, 'added' | 'changed' | 'deleted'> => {
+  const toIdentity = (row: ModelDetailRow): string =>
+    (row.values[0] ?? '').trim() || row.id
+
+  const currentMap = new Map(currentRows.map((row) => [toIdentity(row), row]))
+  const previousMap = new Map(previousRows.map((row) => [toIdentity(row), row]))
+
+  const added: ModelDiffItem[] = []
+  const changed: ModelDiffItem[] = []
+  const deleted: ModelDiffItem[] = []
+
+  for (const [identity, currentRow] of currentMap) {
+    const previousRow = previousMap.get(identity)
+    if (!previousRow) {
+      added.push({ identity, branchValues: currentRow.values, parentValues: [] })
+    } else {
+      const isChanged = currentRow.values.some((value, index) => value !== previousRow.values[index])
+      if (isChanged) {
+        changed.push({ identity, branchValues: currentRow.values, parentValues: previousRow.values })
+      }
+    }
+  }
+
+  for (const [identity, previousRow] of previousMap) {
+    if (!currentMap.has(identity)) {
+      deleted.push({ identity, branchValues: [], parentValues: previousRow.values })
+    }
+  }
+
+  return { added, changed, deleted }
+}
 
 /**
  * 인터페이스 타입별 상세 노드 기본 집합을 반환합니다.
@@ -154,8 +207,6 @@ export function ModelPage() {
   const queryClient = useQueryClient()
 
   const selectedModelVersionKey = useModelUiStore((state) => state.selectedModelVersionKey)
-  const sidebarOpen = useModelUiStore((state) => state.sidebarOpen)
-  const sidebarWidth = useModelUiStore((state) => state.sidebarWidth)
   const openedTabs = useModelUiStore((state) => state.openedTabs)
   const activeTab = useModelUiStore((state) => state.activeTab)
   const detailNode = useModelUiStore((state) => state.detailNode)
@@ -164,9 +215,13 @@ export function ModelPage() {
   const isCheckInModalOpen = useModelUiStore((state) => state.isCheckInModalOpen)
   const isProfileModalOpen = useModelUiStore((state) => state.isProfileModalOpen)
   const setSelectedModelVersionKey = useModelUiStore((state) => state.setSelectedModelVersionKey)
-  const toggleSidebar = useModelUiStore((state) => state.toggleSidebar)
-  const setSidebarWidth = useModelUiStore((state) => state.setSidebarWidth)
   const openModelTab = useModelUiStore((state) => state.openModelTab)
+
+  // 사이드바 상태는 EQP/Model 페이지 간 공유 store에서 관리합니다.
+  const sidebarOpen = useSharedLayoutStore((state) => state.sidebarOpen)
+  const sidebarWidth = useSharedLayoutStore((state) => state.sidebarWidth)
+  const toggleSidebar = useSharedLayoutStore((state) => state.toggleSidebar)
+  const setSidebarWidth = useSharedLayoutStore((state) => state.setSidebarWidth)
   const closeModelTab = useModelUiStore((state) => state.closeModelTab)
   const setActiveTab = useModelUiStore((state) => state.setActiveTab)
   const setDetailNode = useModelUiStore((state) => state.setDetailNode)
@@ -194,6 +249,9 @@ export function ModelPage() {
   } = useModelManagementMutations()
 
   const [checkInErrorMessage, setCheckInErrorMessage] = useState<string | null>(null)
+  const [isCheckInDiffModalOpen, setIsCheckInDiffModalOpen] = useState(false)
+  const [isCheckInDiffLoading, setIsCheckInDiffLoading] = useState(false)
+  const [checkInDiffSections, setCheckInDiffSections] = useState<ModelDiffSection[]>([])
   const [isLogoutPending, setIsLogoutPending] = useState(false)
   const [topPanelHeightPercent, setTopPanelHeightPercent] = useState(PANEL_INITIAL_TOP_PERCENT)
   const [detailColumnsByContext, setDetailColumnsByContext] = useState<Record<string, string[]>>({})
@@ -500,6 +558,23 @@ export function ModelPage() {
   }, [explicitCheckoutModelVersionKey, modelItems])
 
   /**
+   * 새로고침 또는 백엔드 재연결 후 EDIT 버전이 현재 사용자 소유면 explicitCheckoutModelVersionKey를 복원합니다.
+   * canEdit 조건에 explicitCheckoutModelVersionKey 일치 여부가 포함되어 있어,
+   * 이 값이 null로 초기화된 상태에서는 isEditMode가 false가 되어 Check Out 버튼이 다시 나타나게 됩니다.
+   */
+  useEffect(() => {
+    if (explicitCheckoutModelVersionKey !== null || !activeTabModel || !currentUserId) {
+      return
+    }
+    const isEditVersion = activeTabModel.modelVersion.trim().toUpperCase() === 'EDIT'
+    const isBranchVersion = Boolean(activeTabModel.parentModel?.trim())
+
+    if (isEditVersion && isBranchVersion && lockOwner && lockOwner === currentUserId) {
+      setExplicitCheckoutModelVersionKey(activeTabModel.modelVersionKey)
+    }
+  }, [activeTabModel, currentUserId, explicitCheckoutModelVersionKey, lockOwner])
+
+  /**
    * ResizableDivider 드래그 처리.
    */
   const handleDividerDrag = useCallback((deltaY: number) => {
@@ -595,19 +670,25 @@ export function ModelPage() {
       return
     }
 
+    // dcop-itemes에서 Collection Rule 컬럼의 기본값은 LAST입니다.
+    const collectionRuleIndex =
+      detailNode === 'dcop-itemes'
+        ? detailColumns.findIndex((col) => col === 'Collection Rule')
+        : -1
+
     setDetailRowsByContext((previousRowsByContext) => ({
       ...previousRowsByContext,
       [detailContextKey]: [
         ...(previousRowsByContext[detailContextKey] ?? []),
         {
           id: createEditableDetailRowId(),
-          values: detailColumns.map(() => ''),
+          values: detailColumns.map((_, index) => (index === collectionRuleIndex ? 'LAST' : '')),
           previewValues: detailColumns.map(() => ''),
         },
       ],
     }))
     setCheckInErrorMessage(null)
-  }, [detailColumns, detailContextKey])
+  }, [detailColumns, detailContextKey, detailNode])
 
   const handleDeleteDetailRow = useCallback((rowId: string) => {
     if (!detailContextKey) {
@@ -1047,11 +1128,86 @@ export function ModelPage() {
     }
   }
 
-  const handleRequestCheckIn = () => {
-    if (!isEditMode) {
+  /**
+   * Check In 버튼 클릭 시 diff 모달을 먼저 표시합니다.
+   *
+   * 이전 버전(non-EDIT)이 없으면 diff 없이 바로 version/description 모달로 이동합니다.
+   * 이전 버전이 있으면 현재 EDIT 버전과 이전 버전의 각 노드 데이터를 서버에서 조회하여
+   * diff를 계산한 뒤 diff 미리보기 모달을 표시합니다.
+   */
+  const handleRequestCheckIn = async () => {
+    if (!isEditMode || !activeTabModel) {
       return
     }
+
     setCheckInErrorMessage(null)
+
+    // 이전 버전(EDIT이 아닌 동일 modelKey의 최신 버전) 탐색
+    const previousVersionModel = sortByUpdatedAtDesc(
+      modelItems.filter(
+        (item) =>
+          item.modelKey === activeTabModel.modelKey &&
+          item.modelVersion.trim().toUpperCase() !== 'EDIT',
+      ),
+    )[0] ?? null
+
+    if (!previousVersionModel) {
+      // 이전 버전이 없으면 diff 없이 바로 check in 모달 표시
+      setCheckInModalOpen(true)
+      return
+    }
+
+    setIsCheckInDiffLoading(true)
+    setCheckInDiffSections([])
+    setIsCheckInDiffModalOpen(true)
+
+    try {
+      const diffNodes = resolveDetailNodesByInterface(activeTabModel.commInterface).filter(
+        (node) => !DIFF_EXCLUDED_NODES.has(node),
+      )
+
+      // 현재 EDIT 버전과 이전 버전의 모든 노드 데이터를 병렬로 조회합니다.
+      const nodeFetchPairs = diffNodes.map(async (node) => {
+        const [currentData, previousData] = await Promise.all([
+          modelApi.getModelNodeDetail(activeTabModel.modelVersionKey, node),
+          modelApi.getModelNodeDetail(previousVersionModel.modelVersionKey, node),
+        ])
+        return { node, currentData, previousData }
+      })
+
+      const results = await Promise.all(nodeFetchPairs)
+
+      const sections: ModelDiffSection[] = results
+        .map(({ node, currentData, previousData }) => {
+          const { added, changed, deleted } = computeNodeDiff(currentData.rows, previousData.rows)
+          return {
+            detailNode: node,
+            columns: currentData.columns.length > 0 ? currentData.columns : previousData.columns,
+            added,
+            changed,
+            deleted,
+          }
+        })
+        .filter(
+          (section) =>
+            section.added.length > 0 || section.changed.length > 0 || section.deleted.length > 0,
+        )
+
+      setCheckInDiffSections(sections)
+    } catch {
+      // diff 조회 실패 시 diff 없이 바로 check in 모달로 이동합니다.
+      setIsCheckInDiffModalOpen(false)
+      setCheckInModalOpen(true)
+    } finally {
+      setIsCheckInDiffLoading(false)
+    }
+  }
+
+  /**
+   * diff 미리보기 모달에서 OK 클릭 시 version/description 입력 모달로 이동합니다.
+   */
+  const handleCheckInDiffOk = () => {
+    setIsCheckInDiffModalOpen(false)
     setCheckInModalOpen(true)
   }
 
@@ -1171,8 +1327,6 @@ export function ModelPage() {
     : null
 
   const isVersionFrame = activeTab !== null && openedTabs.length > 0
-  const topNavigationOffsetPx =
-    sidebarWidth + CONTENT_START_PADDING_PX - HEADER_HORIZONTAL_PADDING_PX
 
   const handleNavigateMenu = (route: string | null) => {
     if (!route || route === '/model') {
@@ -1182,7 +1336,7 @@ export function ModelPage() {
   }
 
   return (
-    <div className="flex min-h-screen w-screen flex-col bg-[#F7FAF8]">
+    <div className="flex min-h-screen w-screen flex-col overflow-hidden bg-[#F7FAF8]">
       <header className="relative flex h-[52px] items-center justify-between bg-white px-5">
         <div className="flex items-center gap-2.5">
           <div className="flex size-7 items-center justify-center rounded-md bg-[#d95d39]">
@@ -1191,9 +1345,11 @@ export function ModelPage() {
           <span className="font-fraunces text-lg text-[#2D2D2D]">Nori-TC</span>
         </div>
 
+        {/* topbar nav는 사이드바 폭에 관계없이 항상 헤더 중앙에 고정됩니다.
+            좌우 여백을 동일하게(164px) 설정하여 버튼 영역과 겹치지 않도록 합니다. */}
         <div
-          className="pointer-events-none absolute inset-y-0 hidden items-center md:flex"
-          style={{ left: `${topNavigationOffsetPx}px`, right: '164px' }}
+          className="pointer-events-none absolute inset-y-0 hidden items-center justify-center md:flex"
+          style={{ left: '164px', right: '164px' }}
         >
           <nav className="pointer-events-auto flex max-w-full items-center gap-6 overflow-hidden whitespace-nowrap">
             {TOP_NAVIGATION_ITEMS.map((menuItem) => {
@@ -1278,7 +1434,7 @@ export function ModelPage() {
         />
 
         <section className="flex min-w-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {selectedModelVersionKey === null ? (
               <div className="flex flex-1" />
             ) : !isVersionFrame ? (
@@ -1344,7 +1500,7 @@ export function ModelPage() {
                     onUndo={() => void handleUndoCheckIn()}
                     onUploadMdf={(file) => void handleUploadMdf(file)}
                     onCheckOut={() => void handleCheckOut()}
-                    onRequestCheckIn={handleRequestCheckIn}
+                    onRequestCheckIn={() => void handleRequestCheckIn()}
                   />
                 </div>
               </div>
@@ -1352,6 +1508,15 @@ export function ModelPage() {
           </div>
         </section>
       </main>
+
+      <ModelCheckInDiffModal
+        open={isCheckInDiffModalOpen}
+        isPending={isCheckInDiffLoading}
+        diffSections={checkInDiffSections}
+        onOpenChange={setIsCheckInDiffModalOpen}
+        onCancel={() => setIsCheckInDiffModalOpen(false)}
+        onOk={handleCheckInDiffOk}
+      />
 
       <ModelCheckInModal
         open={isCheckInModalOpen}

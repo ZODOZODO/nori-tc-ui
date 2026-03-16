@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { EqpInfo } from '../types/eqp.types'
@@ -19,6 +20,12 @@ interface GatewayGroupTableProps {
  * @param groupName 그룹명 (헤더에 표시)
  */
 export function GatewayGroupTable({ eqpItems, groupName }: GatewayGroupTableProps) {
+  // EQPID(첫 번째 열 = 이름) 기준 오름차순 정렬
+  const sortedEqpItems = useMemo(
+    () => [...eqpItems].sort((a, b) => a.eqpId.localeCompare(b.eqpId)),
+    [eqpItems],
+  )
+
   return (
     <section className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-[#E4EAE6] bg-white p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -40,14 +47,14 @@ export function GatewayGroupTable({ eqpItems, groupName }: GatewayGroupTableProp
             </TableRow>
           </TableHeader>
           <TableBody>
-            {eqpItems.length === 0 ? (
+            {sortedEqpItems.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="py-10 text-center text-sm text-[#647169]">
                   이 그룹에 속한 설비가 없습니다.
                 </TableCell>
               </TableRow>
             ) : (
-              eqpItems.map((eqp) => (
+              sortedEqpItems.map((eqp) => (
                 <TableRow key={eqp.eqpId}>
                   <TableCell>{eqp.eqpId}</TableCell>
                   <TableCell>

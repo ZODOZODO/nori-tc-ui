@@ -4,6 +4,7 @@ import { CircleUserRound, Loader2, LogOut, RotateCcw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { clampSidebarWidth } from '@/shared/layout/sidebar-layout'
+import { useSharedLayoutStore } from '@/shared/stores/shared-layout.store'
 import { CheckInModal } from './CheckInModal'
 import { EqpDeleteConfirmDialog } from './EqpDeleteConfirmDialog'
 import { EqpInfoTable } from './EqpInfoTable'
@@ -44,8 +45,6 @@ const LOGIN_ROUTE = '/login'
 const CSRF_COOKIE_NAME = 'XSRF-TOKEN'
 const EMPTY_VERSION_VALUE = ''
 const NO_VERSION_OPTION_LABEL = '버전 없음'
-const HEADER_HORIZONTAL_PADDING_PX = 20
-const CONTENT_START_PADDING_PX = 16
 
 // ResizableDivider 크기 제한 (%)
 const PANEL_MIN_PERCENT = 15
@@ -163,17 +162,19 @@ export function EqpPage() {
   const queryClient = useQueryClient()
 
   const selection = useEqpUiStore((state) => state.selection)
-  const sidebarOpen = useEqpUiStore((state) => state.sidebarOpen)
-  const sidebarWidth = useEqpUiStore((state) => state.sidebarWidth)
   const isEditMode = useEqpUiStore((state) => state.isEditMode)
   const isProfileModalOpen = useEqpUiStore((state) => state.isProfileModalOpen)
   const selectEqp = useEqpUiStore((state) => state.selectEqp)
   const selectGatewayGroup = useEqpUiStore((state) => state.selectGatewayGroup)
   const clearSelection = useEqpUiStore((state) => state.clearSelection)
-  const toggleSidebar = useEqpUiStore((state) => state.toggleSidebar)
-  const setSidebarWidth = useEqpUiStore((state) => state.setSidebarWidth)
   const setEditMode = useEqpUiStore((state) => state.setEditMode)
   const setProfileModalOpen = useEqpUiStore((state) => state.setProfileModalOpen)
+
+  // 사이드바 상태는 EQP/Model 페이지 간 공유 store에서 관리합니다.
+  const sidebarOpen = useSharedLayoutStore((state) => state.sidebarOpen)
+  const sidebarWidth = useSharedLayoutStore((state) => state.sidebarWidth)
+  const toggleSidebar = useSharedLayoutStore((state) => state.toggleSidebar)
+  const setSidebarWidth = useSharedLayoutStore((state) => state.setSidebarWidth)
 
   // selection에서 현재 선택된 eqpId 파생 (eqp 타입일 때만 유효)
   const selectedEqpId = selection.type === 'eqp' ? selection.eqpId : null
@@ -242,7 +243,18 @@ export function EqpPage() {
     checkedOutBy: checkoutStatusQuery.data?.checkedOutBy ?? null,
   }), [checkoutStatusQuery.data])
   const isCheckedOutByCurrentUser = useMemo(() => {
-    if (!checkoutStatus.isCheckedOut || !currentUserId) {
+    if (!checkoutStatus.isCheckedOut) {
+      return false
+    }
+
+    // NOTE: checkedOutBy가 null이면 백엔드 세션 기반으로 소유자 확인 불가.
+    // 타인이 체크아웃한 경우 백엔드는 반드시 checkedOutBy를 채워 반환해야 하므로,
+    // null인 경우 현재 사용자 본인의 체크아웃으로 간주합니다.
+    if (!checkoutStatus.checkedOutBy) {
+      return true
+    }
+
+    if (!currentUserId) {
       return false
     }
 
@@ -835,9 +847,6 @@ export function EqpPage() {
 
   // 사이드바에 전달할 선택된 그룹 인덱스
   const selectedGroupIndex = selection.type === 'gateway_group' ? selection.groupIndex : null
-  const topNavigationOffsetPx =
-    sidebarWidth + CONTENT_START_PADDING_PX - HEADER_HORIZONTAL_PADDING_PX
-
   const handleNavigateMenu = (route: string | null) => {
     if (!route || route === '/eqp') {
       return
@@ -855,9 +864,11 @@ export function EqpPage() {
           <span className="font-fraunces text-lg text-[#2D2D2D]">Nori-TC</span>
         </div>
 
+        {/* topbar nav는 사이드바 폭에 관계없이 항상 헤더 중앙에 고정됩니다.
+            좌우 여백을 동일하게(164px) 설정하여 버튼 영역과 겹치지 않도록 합니다. */}
         <div
-          className="pointer-events-none absolute inset-y-0 hidden items-center md:flex"
-          style={{ left: `${topNavigationOffsetPx}px`, right: '164px' }}
+          className="pointer-events-none absolute inset-y-0 hidden items-center justify-center md:flex"
+          style={{ left: '164px', right: '164px' }}
         >
           <nav className="pointer-events-auto flex max-w-full items-center gap-6 overflow-hidden whitespace-nowrap">
             {TOP_NAVIGATION_ITEMS.map((menuItem) => {

@@ -71,13 +71,9 @@ export function ModelInfoTable({
   onSelectRow,
   onOpenDetail,
 }: ModelInfoTableProps) {
+  // updated_at 내림차순 정렬 (최근 수정 순)
   const sortedModels = useMemo(
-    () =>
-      [...models].sort((firstItem, secondItem) => {
-        const secondTime = Date.parse(secondItem.updatedAt)
-        const firstTime = Date.parse(firstItem.updatedAt)
-        return secondTime - firstTime
-      }),
+    () => [...models].sort((firstItem, secondItem) => secondItem.updatedAt.localeCompare(firstItem.updatedAt)),
     [models],
   )
 
