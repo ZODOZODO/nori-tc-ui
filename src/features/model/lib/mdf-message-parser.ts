@@ -9,10 +9,20 @@ interface XmlTagToken {
   isSelfClosing: boolean
 }
 
+/** MDF message의 output 직렬화 포맷입니다. */
+export type MdfOutputType = 'RAW_MESSAGE' | 'KAFKA'
+
+/** MDF message의 전송 대상입니다. */
+export type MdfTargetType = 'EQP' | 'MES'
+
 export interface MdfMessageOption {
   messageName: string
   sourceName: string
   xmlSnippet: string
+  /** message element의 target 속성 값입니다. 명시되지 않으면 null입니다. */
+  targetType: MdfTargetType | null
+  /** message element의 output 속성 값입니다. 명시되지 않으면 null입니다. */
+  outputType: MdfOutputType | null
 }
 
 const XML_FIELD_TAG_NAME = 'field'
@@ -87,10 +97,15 @@ const toMessageOption = (xmlFragment: string, sourceName: string): MdfMessageOpt
     return null
   }
 
+  const targetType = parseTargetType(readXmlAttribute(token.raw, 'target'))
+  const outputType = parseOutputType(readXmlAttribute(token.raw, 'output'))
+
   return {
     messageName,
     sourceName,
     xmlSnippet: xmlFragment.trim(),
+    targetType,
+    outputType,
   }
 }
 
@@ -267,6 +282,22 @@ const findTagEnd = (xml: string, startIndex: number): number => {
   }
 
   return -1
+}
+
+const parseTargetType = (value: string): MdfTargetType | null => {
+  const upper = value.toUpperCase()
+  if (upper === 'EQP' || upper === 'MES') {
+    return upper as MdfTargetType
+  }
+  return null
+}
+
+const parseOutputType = (value: string): MdfOutputType | null => {
+  const upper = value.toUpperCase()
+  if (upper === 'RAW_MESSAGE' || upper === 'KAFKA') {
+    return upper as MdfOutputType
+  }
+  return null
 }
 
 const readXmlAttribute = (rawTag: string, attributeName: string): string => {

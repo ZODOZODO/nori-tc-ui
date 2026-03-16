@@ -463,6 +463,10 @@ export const modelApi = {
             withCredentials: true,
             headers: {
               [CSRF_HEADER_NAME]: csrfToken,
+              // apiClient 기본 헤더에 'Content-Type: application/json'이 설정되어 있어
+              // FormData 업로드 시 axios의 자동 multipart/form-data 설정을 덮어쓰는 문제가 발생합니다.
+              // undefined로 명시하면 axios가 FormData를 감지하여 boundary 포함 Content-Type을 자동 설정합니다.
+              'Content-Type': undefined,
             },
             validateStatus: (status) => status >= 200 && status < 600,
           },

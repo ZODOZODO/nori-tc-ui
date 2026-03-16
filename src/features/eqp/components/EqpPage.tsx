@@ -14,7 +14,7 @@ import { EqpParamTable } from './EqpParamTable'
 import { EqpParamVersionModal } from './EqpParamVersionModal'
 import { EqpSidebar } from './EqpSidebar'
 import { GatewayGroupTable } from './GatewayGroupTable'
-import { ResizableDivider } from './ResizableDivider'
+import { ResizableDivider } from '@/components/ui/resizable-divider'
 import { authApi } from '@/features/auth/api/auth.api'
 import { useEqpDetail } from '../hooks/useEqpDetail'
 import { useEqpList } from '../hooks/useEqpList'
@@ -49,7 +49,6 @@ const NO_VERSION_OPTION_LABEL = '버전 없음'
 // ResizableDivider 크기 제한 (%)
 const PANEL_MIN_PERCENT = 15
 const PANEL_MAX_PERCENT = 85
-const PANEL_INITIAL_TOP_PERCENT = 35
 
 type EditableEqpParamRow = EqpParamRow & { rowId: string }
 
@@ -169,6 +168,8 @@ export function EqpPage() {
   const clearSelection = useEqpUiStore((state) => state.clearSelection)
   const setEditMode = useEqpUiStore((state) => state.setEditMode)
   const setProfileModalOpen = useEqpUiStore((state) => state.setProfileModalOpen)
+  const topPanelHeightPercent = useEqpUiStore((state) => state.topPanelHeightPercent)
+  const setTopPanelHeightPercent = useEqpUiStore((state) => state.setTopPanelHeightPercent)
 
   // 사이드바 상태는 EQP/Model 페이지 간 공유 store에서 관리합니다.
   const sidebarOpen = useSharedLayoutStore((state) => state.sidebarOpen)
@@ -216,8 +217,6 @@ export function EqpPage() {
   )
   const [managementErrorMessage, setManagementErrorMessage] = useState<string | null>(null)
 
-  // ResizableDivider 상단 패널 높이 비율 (%)
-  const [topPanelHeightPercent, setTopPanelHeightPercent] = useState(PANEL_INITIAL_TOP_PERCENT)
   // 가운데 컨테이너 높이 계산용 ref
   const centerContainerRef = useRef<HTMLDivElement>(null)
   // 체크아웃 중복 요청(더블 클릭) 방지용 로컬 가드

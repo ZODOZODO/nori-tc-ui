@@ -58,14 +58,10 @@ const WORKFLOW_MODAL_EDITABLE_COLUMNS = new Set(['filter', 'data index'])
 const EMPTY_MDF_TEMPLATE_VALUE = '__empty__'
 
 /**
- * workflow 노드에서 Filter/Data Index/Action Name 컬럼은 너비를 고정하여
- * Filter 적용 시 다른 컬럼이 압박되는 현상을 방지합니다.
+ * 모든 model 상세 테이블이 동일한 가시 프레임을 유지하도록 공통 최소 폭을 강제합니다.
+ * 내용이 길어도 바깥 패널이 아니라 테이블 viewport 내부에서만 스크롤되도록 고정합니다.
  */
-const WORKFLOW_COLUMN_FIXED_CLASS: Record<string, string> = {
-  Filter: 'w-[180px] min-w-[180px] max-w-[180px]',
-  'Data Index': 'w-[180px] min-w-[180px] max-w-[180px]',
-  'Action Name': 'w-[180px] min-w-[180px] max-w-[180px]',
-}
+const MODEL_DETAIL_TABLE_CLASS = 'w-full min-w-[1120px] table-fixed'
 
 interface WorkflowTextEditorState {
   rowId: string
@@ -1009,9 +1005,9 @@ export function ModelDetailPanel({
             ))}
           </aside>
 
-          <div className="min-h-0 min-w-0 flex-1 overflow-auto p-3">
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-3">
             {isMdfNode ? (
-              <div className="flex min-h-full flex-col space-y-3">
+              <div className="flex h-full min-h-0 flex-col">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1020,28 +1016,30 @@ export function ModelDetailPanel({
                   onChange={handleUploadFileChange}
                 />
 
-                {isDetailLoading ? (
-                  <p className="text-sm text-[#647169]">MDF 데이터를 불러오는 중입니다.</p>
-                ) : null}
+                <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
+                  {isDetailLoading ? (
+                    <p className="text-sm text-[#647169]">MDF 데이터를 불러오는 중입니다.</p>
+                  ) : null}
 
-                {detailErrorMessage ? (
-                  <p className="text-sm text-[#C5534B]">{detailErrorMessage}</p>
-                ) : null}
+                  {detailErrorMessage ? (
+                    <p className="text-sm text-[#C5534B]">{detailErrorMessage}</p>
+                  ) : null}
 
-                {!isDetailLoading && !detailErrorMessage && mdfContents.length === 0 ? (
-                  <p className="text-sm text-[#647169]">표시할 MDF 데이터가 없습니다.</p>
-                ) : null}
+                  {!isDetailLoading && !detailErrorMessage && mdfContents.length === 0 ? (
+                    <p className="text-sm text-[#647169]">표시할 MDF 데이터가 없습니다.</p>
+                  ) : null}
 
-                {mdfContents.map((content) => (
-                  <div key={content.id} className="flex min-h-[340px] flex-1 flex-col space-y-1">
-                    <p className="text-xs font-medium text-[#44544D]">{`DEFAULT: ${content.name || 'MDF'}`}</p>
-                    <textarea
-                      readOnly
-                      value={content.xml}
-                      className="min-h-[320px] w-full flex-1 resize-none rounded-lg border border-[#DCE5E0] bg-[#FAFCFB] p-3 font-mono text-xs text-[#22322B] focus-visible:outline-none"
-                    />
-                  </div>
-                ))}
+                  {mdfContents.map((content) => (
+                    <div key={content.id} className="flex min-h-[340px] flex-col space-y-1">
+                      <p className="text-xs font-medium text-[#44544D]">{`DEFAULT: ${content.name || 'MDF'}`}</p>
+                      <textarea
+                        readOnly
+                        value={content.xml}
+                        className="min-h-[320px] w-full flex-1 resize-none rounded-lg border border-[#DCE5E0] bg-[#FAFCFB] p-3 font-mono text-xs text-[#22322B] focus-visible:outline-none"
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
               <div className="flex h-full min-h-0 flex-col">
@@ -1064,13 +1062,12 @@ export function ModelDetailPanel({
                 </div>
 
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-                  <Table className="min-w-[760px]">
+                  <Table className={MODEL_DETAIL_TABLE_CLASS}>
                     <TableHeader>
                       <TableRow className="bg-[#F6F9F7]">
                         {normalizedDetailColumns.map((columnName) => (
                           <TableHead
                             key={columnName}
-                            className={isWorkflowNode ? WORKFLOW_COLUMN_FIXED_CLASS[columnName] : undefined}
                           >
                             {columnName}
                           </TableHead>
@@ -1129,12 +1126,12 @@ export function ModelDetailPanel({
                               return (
                                 <TableCell
                                   key={`${row.id}-${columnIndex}`}
-                                  className={isWorkflowNode ? WORKFLOW_COLUMN_FIXED_CLASS[columnName] : undefined}
+                                  className="overflow-hidden"
                                 >
                                   {isReadOnly ? (
                                     <span
                                       className={cn(
-                                        'block max-w-[320px] truncate text-sm text-[#22322B]',
+                                        'block max-w-full truncate text-sm text-[#22322B]',
                                         displayValue ? null : 'text-[#8A8A8A]',
                                       )}
                                       title={displayValue || rawValue}
@@ -1146,7 +1143,7 @@ export function ModelDetailPanel({
                                       columnName,
                                     ) ? (
                                     <div
-                                      className="group flex min-h-8 items-center gap-2 rounded-md border border-[#DCE5E0] bg-white px-2 py-1.5"
+                                      className="group flex min-h-8 min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-md border border-[#DCE5E0] bg-white px-2 py-1.5"
                                       onDoubleClick={() =>
                                         handleOpenWorkflowTextEditor(row, rowIndex, columnIndex)
                                       }

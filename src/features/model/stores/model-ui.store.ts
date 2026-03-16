@@ -18,6 +18,8 @@ interface ModelUiState {
   isEditMode: boolean
   isCheckInModalOpen: boolean
   isProfileModalOpen: boolean
+  /** 상하 패널 분리 핸들의 상단 패널 높이 비율(%) */
+  topPanelHeightPercent: number
   setSelectedModelVersionKey: (modelVersionKey: number | null) => void
   setSidebarOpen: (open: boolean) => void
   setSidebarWidth: (width: number) => void
@@ -32,6 +34,11 @@ interface ModelUiState {
   setEditMode: (enabled: boolean) => void
   setCheckInModalOpen: (open: boolean) => void
   setProfileModalOpen: (open: boolean) => void
+  /**
+   * 상하 패널 높이 비율을 갱신합니다.
+   * 직접 값 또는 이전 값을 받는 updater 함수 모두 허용합니다.
+   */
+  setTopPanelHeightPercent: (updater: number | ((prev: number) => number)) => void
   handleModelVersionsRemoved: (
     removedModelVersionKeys: number[],
     fallbackSelectedModelVersionKey?: number | null,
@@ -42,6 +49,9 @@ interface ModelUiState {
   ) => void
   reset: () => void
 }
+
+/** 상하 패널 초기 높이 비율(%) */
+export const MODEL_PANEL_INITIAL_TOP_PERCENT = 35
 
 /**
  * ModelInfo를 Detail 탭 데이터 모델로 변환합니다.
@@ -69,6 +79,7 @@ export const useModelUiStore = create<ModelUiState>((set) => ({
   isEditMode: false,
   isCheckInModalOpen: false,
   isProfileModalOpen: false,
+  topPanelHeightPercent: MODEL_PANEL_INITIAL_TOP_PERCENT,
   setSelectedModelVersionKey: (modelVersionKey) => set({ selectedModelVersionKey: modelVersionKey }),
   setSidebarOpen: (open) =>
     set((state) =>
@@ -195,6 +206,11 @@ export const useModelUiStore = create<ModelUiState>((set) => ({
   setEditMode: (enabled) => set({ isEditMode: enabled }),
   setCheckInModalOpen: (open) => set({ isCheckInModalOpen: open }),
   setProfileModalOpen: (open) => set({ isProfileModalOpen: open }),
+  setTopPanelHeightPercent: (updater) =>
+    set((state) => ({
+      topPanelHeightPercent:
+        typeof updater === 'function' ? updater(state.topPanelHeightPercent) : updater,
+    })),
   handleModelVersionsRemoved: (removedModelVersionKeys, fallbackSelectedModelVersionKey = null) =>
     set((state) => {
       const removedVersionKeySet = new Set(removedModelVersionKeys)
@@ -274,5 +290,6 @@ export const useModelUiStore = create<ModelUiState>((set) => ({
       isEditMode: false,
       isCheckInModalOpen: false,
       isProfileModalOpen: false,
+      topPanelHeightPercent: MODEL_PANEL_INITIAL_TOP_PERCENT,
     }),
 }))

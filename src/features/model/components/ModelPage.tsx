@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { authApi } from '@/features/auth/api/auth.api'
 import { UserProfileModal } from '@/features/profile/components/UserProfileModal'
 import { useMe } from '@/features/profile/hooks/useProfile'
-import { ResizableDivider } from '@/features/eqp/components/ResizableDivider'
+import { ResizableDivider } from '@/components/ui/resizable-divider'
 import { clampSidebarWidth } from '@/shared/layout/sidebar-layout'
 import { useSharedLayoutStore } from '@/shared/stores/shared-layout.store'
 import { useModelDetail } from '../hooks/useModelDetail'
@@ -49,7 +49,6 @@ const CSRF_COOKIE_NAME = 'XSRF-TOKEN'
 // ResizableDivider 크기 제한 (%)
 const PANEL_MIN_PERCENT = 15
 const PANEL_MAX_PERCENT = 85
-const PANEL_INITIAL_TOP_PERCENT = 35
 
 /**
  * 상단 네비게이션 메뉴 구성입니다.
@@ -72,6 +71,13 @@ const resolveErrorMessage = (error: unknown, fallbackMessage: string): string =>
 
   return fallbackMessage
 }
+
+/**
+ * 상세 데이터 rows를 첫 번째 컬럼 값 기준으로 오름차순 정렬합니다.
+ * Model Param, Workflow, Dcop Items 등 모든 detail 테이블에 공통 적용됩니다.
+ */
+const sortDetailRowsByFirstColumn = (rows: ModelDetailRow[]): ModelDetailRow[] =>
+  [...rows].sort((a, b) => (a.values[0] ?? '').localeCompare(b.values[0] ?? ''))
 
 /**
  * 브라우저에서 접근 가능한 CSRF 쿠키를 삭제합니다.
@@ -229,6 +235,8 @@ export function ModelPage() {
   const setEditMode = useModelUiStore((state) => state.setEditMode)
   const setCheckInModalOpen = useModelUiStore((state) => state.setCheckInModalOpen)
   const setProfileModalOpen = useModelUiStore((state) => state.setProfileModalOpen)
+  const topPanelHeightPercent = useModelUiStore((state) => state.topPanelHeightPercent)
+  const setTopPanelHeightPercent = useModelUiStore((state) => state.setTopPanelHeightPercent)
   const handleModelVersionsRemoved = useModelUiStore((state) => state.handleModelVersionsRemoved)
   const resetUiState = useModelUiStore((state) => state.reset)
 
@@ -253,7 +261,6 @@ export function ModelPage() {
   const [isCheckInDiffLoading, setIsCheckInDiffLoading] = useState(false)
   const [checkInDiffSections, setCheckInDiffSections] = useState<ModelDiffSection[]>([])
   const [isLogoutPending, setIsLogoutPending] = useState(false)
-  const [topPanelHeightPercent, setTopPanelHeightPercent] = useState(PANEL_INITIAL_TOP_PERCENT)
   const [detailColumnsByContext, setDetailColumnsByContext] = useState<Record<string, string[]>>({})
   const [detailRowsByContext, setDetailRowsByContext] = useState<Record<string, ModelDetailRow[]>>({})
   const [detailMdfByContext, setDetailMdfByContext] = useState<Record<string, ModelMdfContent[]>>({})
@@ -467,7 +474,7 @@ export function ModelPage() {
 
       return {
         ...previousRowsByContext,
-        [contextKey]: detailNodeQuery.data.rows,
+        [contextKey]: sortDetailRowsByFirstColumn(detailNodeQuery.data.rows),
       }
     })
 
@@ -727,7 +734,7 @@ export function ModelPage() {
       }))
       setDetailRowsByContext((previousRowsByContext) => ({
         ...previousRowsByContext,
-        [detailContextKey]: savedDetail.rows,
+        [detailContextKey]: sortDetailRowsByFirstColumn(savedDetail.rows),
       }))
     } catch (error) {
       setCheckInErrorMessage(resolveErrorMessage(error, '상세 데이터를 저장하지 못했습니다.'))
@@ -1309,10 +1316,10 @@ export function ModelPage() {
     } catch {
       // 로그아웃 API 실패 시에도 로컬 세션 정리를 우선합니다.
     } finally {
+      // resetUiState()가 store의 reset()을 호출하므로 topPanelHeightPercent도 함께 초기화됩니다.
       resetUiState()
       setCheckInErrorMessage(null)
       setExplicitCheckoutModelVersionKey(null)
-      setTopPanelHeightPercent(PANEL_INITIAL_TOP_PERCENT)
       setDetailColumnsByContext({})
       setDetailRowsByContext({})
       setDetailMdfByContext({})
@@ -1452,7 +1459,7 @@ export function ModelPage() {
               <div ref={centerContainerRef} className="flex flex-1 flex-col overflow-hidden">
                 <div
                   style={{ height: `${topPanelHeightPercent}%` }}
-                  className="overflow-auto p-3 pb-0 md:p-4 md:pb-0"
+                  className="min-h-0 overflow-auto p-3 pb-0 md:p-4 md:pb-0"
                 >
                   <ModelInfoTable
                     models={selectedModelRows}
@@ -1469,7 +1476,7 @@ export function ModelPage() {
 
                 <div
                   style={{ height: `${100 - topPanelHeightPercent}%` }}
-                  className="overflow-auto p-3 pt-0 md:p-4 md:pt-0"
+                  className="min-h-0 overflow-hidden p-3 pt-0 md:p-4 md:pt-0"
                 >
                   <ModelDetailPanel
                     openedTabs={openedTabs}

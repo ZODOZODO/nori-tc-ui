@@ -14,6 +14,8 @@ interface EqpUiState {
   expandedSidebarWidth: number
   isEditMode: boolean
   isProfileModalOpen: boolean
+  /** 상하 패널 분리 핸들의 상단 패널 높이 비율(%) */
+  topPanelHeightPercent: number
   selectEqp: (eqpId: string) => void
   selectGatewayGroup: (groupIndex: number) => void
   clearSelection: () => void
@@ -24,11 +26,19 @@ interface EqpUiState {
   toggleSidebar: () => void
   setEditMode: (enabled: boolean) => void
   setProfileModalOpen: (open: boolean) => void
+  /**
+   * 상하 패널 높이 비율을 갱신합니다.
+   * 직접 값 또는 이전 값을 받는 updater 함수 모두 허용합니다.
+   */
+  setTopPanelHeightPercent: (updater: number | ((prev: number) => number)) => void
 }
 
 interface EqpUiPersistedState {
   selection: EqpSelection
 }
+
+/** 상하 패널 초기 높이 비율(%) */
+export const EQP_PANEL_INITIAL_TOP_PERCENT = 35
 
 const EQP_UI_SELECTION_STORAGE_KEY = 'eqp-ui-selection'
 
@@ -48,6 +58,7 @@ export const useEqpUiStore = create<EqpUiState>()(
       expandedSidebarWidth: SIDEBAR_DEFAULT_WIDTH_PX,
       isEditMode: false,
       isProfileModalOpen: false,
+      topPanelHeightPercent: EQP_PANEL_INITIAL_TOP_PERCENT,
       // 개별 설비 선택
       selectEqp: (eqpId) => set({ selection: { type: 'eqp', eqpId } }),
       // gateway_app 그룹 선택
@@ -99,6 +110,11 @@ export const useEqpUiStore = create<EqpUiState>()(
         ),
       setEditMode: (enabled) => set({ isEditMode: enabled }),
       setProfileModalOpen: (open) => set({ isProfileModalOpen: open }),
+      setTopPanelHeightPercent: (updater) =>
+        set((state) => ({
+          topPanelHeightPercent:
+            typeof updater === 'function' ? updater(state.topPanelHeightPercent) : updater,
+        })),
     }),
     {
       name: EQP_UI_SELECTION_STORAGE_KEY,
