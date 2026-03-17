@@ -149,6 +149,7 @@ export type ModelNodeDetailResponse = ApiResponse<ModelNodeDetailPayload>
 export type ModelDetailNode =
   | 'model-parameter'
   | 'secs-message'
+  | 'mes-message'
   | 'variableides'
   | 'reportides'
   | 'eventides'
@@ -247,6 +248,7 @@ export type ModelParentCommitResponse = ApiResponse<ModelParentCommitResult>
 export const SECS_DETAIL_NODES: ModelDetailNode[] = [
   'model-parameter',
   'secs-message',
+  'mes-message',
   'variableides',
   'reportides',
   'eventides',
@@ -261,6 +263,7 @@ export const SECS_DETAIL_NODES: ModelDetailNode[] = [
 export const SOCKET_DETAIL_NODES: ModelDetailNode[] = [
   'model-parameter',
   'socket-message',
+  'mes-message',
   'workflow',
   'mdf',
   'dcop-itemes',
@@ -272,6 +275,7 @@ export const SOCKET_DETAIL_NODES: ModelDetailNode[] = [
 export const MODEL_DETAIL_NODE_LABELS: Record<ModelDetailNode, string> = {
   'model-parameter': 'Model Parameter',
   'secs-message': 'SECS Message',
+  'mes-message': 'MES Message',
   variableides: 'Variableides',
   reportides: 'ReportIdes',
   eventides: 'EventIdes',

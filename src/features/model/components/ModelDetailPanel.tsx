@@ -645,6 +645,21 @@ export function ModelDetailPanel({
     [workflowMessageQuery.data?.rows],
   )
 
+  // workflow 편집 시 MES Message Name도 포함합니다. (SECS/Socket 모델 공통 적용)
+  const mesMessageQuery = useModelNodeDetail(
+    isWorkflowNode && !isReadOnly ? (activeModel?.modelVersionKey ?? null) : null,
+    'mes-message',
+  )
+  const mesMessageOptions = useMemo(
+    () => mesMessageQuery.data?.rows.map((row) => row.values[0] ?? '').filter(Boolean) ?? [],
+    [mesMessageQuery.data?.rows],
+  )
+  // SECS/Socket Message 이름과 MES Message 이름을 합친 드롭다운 옵션
+  const allMessageOptions = useMemo(
+    () => [...workflowMessageOptions, ...mesMessageOptions],
+    [workflowMessageOptions, mesMessageOptions],
+  )
+
   // SECS 모델 workflow / dcop-itemes 편집 시 EventId 정합성을 위해 eventides 데이터를 조회합니다.
   // (SOCKET 모델이거나 읽기 전용 상태에서는 조회하지 않음)
   const workflowEventIdQuery = useModelNodeDetail(
@@ -1179,10 +1194,10 @@ export function ModelDetailPanel({
                                     >
                                       <option value="">—</option>
                                       {/* 현재 값이 목록에 없으면 fallback option으로 보존 */}
-                                      {rawValue && !workflowMessageOptions.includes(rawValue) && (
+                                      {rawValue && !allMessageOptions.includes(rawValue) && (
                                         <option value={rawValue}>{rawValue}</option>
                                       )}
-                                      {workflowMessageOptions.map((name) => (
+                                      {allMessageOptions.map((name) => (
                                         <option key={name} value={name}>
                                           {name}
                                         </option>
